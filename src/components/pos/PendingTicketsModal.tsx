@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Clock, RotateCcw, Loader2, Utensils, Package, Truck } from 'lucide-react';
+import { X, Clock, RotateCcw, Loader2, Utensils, Package, Truck, Ban } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
-import type { Sale } from '../../types/database';
+import { AdminPinModal } from './AdminPinModal';
+import type { Sale, UserWithRole } from '../../types/database';
 
 const saleTypeLabels: Record<string, { label: string; icon: typeof Utensils; color: string }> = {
   dine_in:  { label: 'Sur place',        icon: Utensils, color: 'text-blue-400' },
@@ -21,12 +22,13 @@ interface PendingTicketsModalProps {
 export function PendingTicketsModal({ onClose, onResumed }: PendingTicketsModalProps) {
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
-  const { loadPendingSale } = usePOS();
+  const { loadPendingSale, cancelSale } = usePOS();
   const { settings } = useSettings();
   const sym = settings.currency_symbol;
   const [tickets, setTickets] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [resumingId, setResumingId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Sale | null>(null);
 
   useEffect(() => {
     loadTickets();
@@ -51,6 +53,15 @@ export function PendingTicketsModal({ onClose, onResumed }: PendingTicketsModalP
     onResumed();
   }
 
+  async function handleCancelConfirm(admin: UserWithRole, reason: string) {
+    if (!cancelTarget) return;
+    const ok = await cancelSale(cancelTarget.id, admin.id, reason);
+    if (ok) {
+      setTickets(prev => prev.filter(t => t.id !== cancelTarget.id));
+    }
+    setCancelTarget(null);
+  }
+
   function formatTime(iso: string) {
     return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   }
@@ -60,6 +71,7 @@ export function PendingTicketsModal({ onClose, onResumed }: PendingTicketsModalP
   }
 
   return (
+    <>
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }}
@@ -167,6 +179,17 @@ export function PendingTicketsModal({ onClose, onResumed }: PendingTicketsModalP
                       )}
                       <span className="hidden sm:inline">Reprendre</span>
                     </motion.button>
+
+                    {/* Cancel button */}
+                    <motion.button
+                      onClick={() => setCancelTarget(ticket)}
+                      disabled={resumingId !== null}
+                      whileTap={{ scale: 0.95 }}
+                      className="flex items-center gap-1 px-2 py-2 rounded-xl bg-red-600/15 hover:bg-red-600/25 border border-red-500/25 hover:border-red-500/40 disabled:opacity-50 text-red-400 text-xs font-semibold transition-all flex-shrink-0"
+                      title="Annuler ce ticket"
+                    >
+                      <Ban size={13} />
+                    </motion.button>
                   </motion.div>
                 );
               })
@@ -175,5 +198,17 @@ export function PendingTicketsModal({ onClose, onResumed }: PendingTicketsModalP
         </motion.div>
       </motion.div>
     </AnimatePresence>
+
+    <AnimatePresence>
+      {cancelTarget && (
+        <AdminPinModal
+          title="Annulation de ticket"
+          description={`Annuler le ticket #${cancelTarget.sale_number} (${cancelTarget.total.toLocaleString('fr-FR')} ${sym})`}
+          onConfirm={handleCancelConfirm}
+          onClose={() => setCancelTarget(null)}
+        />
+      )}
+    </AnimatePresence>
+    </>
   );
 }

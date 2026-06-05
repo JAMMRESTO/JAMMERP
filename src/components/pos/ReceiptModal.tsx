@@ -1,13 +1,15 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Printer, CheckCircle2,
-  Utensils, Package, Truck, RotateCcw, Phone, MapPin
+  Utensils, Package, Truck, RotateCcw, Phone, MapPin, Ban
 } from 'lucide-react';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
+import { AdminPinModal } from './AdminPinModal';
 import { esc, fmtNum, fmtAmt, THERMAL_CSS, buildThermalHeader, printViaPopup } from '../../lib/printUtils';
+import type { UserWithRole } from '../../types/database';
 
 const saleTypeLabels = {
   dine_in:  { label: 'Sur place',        icon: Utensils },
@@ -21,11 +23,13 @@ interface ReceiptModalProps {
 }
 
 export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
-  const { currentSale, currentSaleItems, total, subtotal, taxAmount, discountAmount, saleType, tableNumber, customerName, selectedCustomer, lastPayments } = usePOS();
+  const { currentSale, currentSaleItems, total, subtotal, taxAmount, discountAmount, saleType, tableNumber, customerName, selectedCustomer, lastPayments, cancelSale } = usePOS();
   const { settings } = useSettings();
   const { currentUser } = useAuth();
   const receiptRef = useRef<HTMLDivElement>(null);
   const sym = settings.currency_symbol;
+  const [showCancelPin, setShowCancelPin] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
 
   if (!currentSale) return null;
 
@@ -116,7 +120,15 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
     onClose();
   }
 
+  async function handleCancelConfirm(admin: UserWithRole, reason: string) {
+    if (!sale) return;
+    const ok = await cancelSale(sale.id, admin.id, reason);
+    if (ok) setIsCancelled(true);
+    setShowCancelPin(false);
+  }
+
   return (
+    <>
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }}
@@ -227,6 +239,19 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
 
           {/* Actions */}
           <div className="px-6 pb-6 flex flex-col gap-2">
+            {isCancelled ? (
+              <div className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 font-medium text-sm">
+                <Ban size={16} />
+                Vente annulée
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowCancelPin(true)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl bg-red-500/8 hover:bg-red-500/15 border border-red-500/20 hover:border-red-500/30 text-red-400 font-medium text-sm transition-all"
+              >
+                <Ban size={15} /> Annuler cette vente
+              </button>
+            )}
             <button
               onClick={handlePrint}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/8 hover:bg-white/14 border border-white/10 text-white font-medium text-sm transition-all"
@@ -243,5 +268,17 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
         </motion.div>
       </motion.div>
     </AnimatePresence>
+
+    <AnimatePresence>
+      {showCancelPin && (
+        <AdminPinModal
+          title="Annulation de vente"
+          description={`Annuler le ticket #${sale.sale_number} (${total.toLocaleString('fr-FR')} ${sym})`}
+          onConfirm={handleCancelConfirm}
+          onClose={() => setShowCancelPin(false)}
+        />
+      )}
+    </AnimatePresence>
+    </>
   );
 }

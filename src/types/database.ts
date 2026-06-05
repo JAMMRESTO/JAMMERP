@@ -186,6 +186,9 @@ export interface Sale {
   cashier_id: string | null;
   created_at: string;
   paid_at: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
+  cancel_reason: string;
 }
 
 export interface SaleItem {
