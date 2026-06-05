@@ -187,6 +187,7 @@ export interface Sale {
   created_at: string;
   paid_at: string | null;
   cancelled_by: string | null;
+  cancelled_by_name: string;
   cancelled_at: string | null;
   cancel_reason: string;
 }

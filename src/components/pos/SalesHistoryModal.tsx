@@ -57,11 +57,11 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
 
   async function handleCancelConfirm(admin: UserWithRole, reason: string) {
     if (!cancelTarget) return;
-    const ok = await cancelSale(cancelTarget.id, admin.id, reason);
+    const ok = await cancelSale(cancelTarget.id, admin.id, admin.name, reason);
     if (ok) {
       setSales(prev => prev.map(s =>
         s.id === cancelTarget.id
-          ? { ...s, status: 'cancelled' as const, cancelled_by: admin.id, cancelled_at: new Date().toISOString(), cancel_reason: reason }
+          ? { ...s, status: 'cancelled' as const, cancelled_by: admin.id, cancelled_by_name: admin.name, cancelled_at: new Date().toISOString(), cancel_reason: reason }
           : s
       ));
       setCancelSuccess(cancelTarget.id);

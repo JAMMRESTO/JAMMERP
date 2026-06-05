@@ -35,7 +35,7 @@ interface POSContextType {
   completeSale: (payments: { method: PaymentMethod; amount: number; reference?: string }[]) => Promise<{ sale: Sale; items: SaleItem[] } | null>;
   deferSale: () => Promise<{ sale: Sale; items: SaleItem[] } | null>;
   loadPendingSale: (saleId: string) => Promise<void>;
-  cancelSale: (saleId: string, adminId: string, reason: string) => Promise<boolean>;
+  cancelSale: (saleId: string, adminId: string, adminName: string, reason: string) => Promise<boolean>;
   isPendingResume: boolean;
   currentSale: Sale | null;
   currentSaleItems: SaleItem[];
@@ -277,12 +277,13 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
     await supabase.from('sales').delete().eq('id', saleId).eq('site_id', siteId);
   }, [siteId]);
 
-  const cancelSale = useCallback(async (saleId: string, adminId: string, reason: string): Promise<boolean> => {
+  const cancelSale = useCallback(async (saleId: string, adminId: string, adminName: string, reason: string): Promise<boolean> => {
     const { error } = await supabase
       .from('sales')
       .update({
         status: 'cancelled',
         cancelled_by: adminId,
+        cancelled_by_name: adminName,
         cancelled_at: new Date().toISOString(),
         cancel_reason: reason,
       })

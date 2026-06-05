@@ -55,7 +55,7 @@ export function PendingTicketsModal({ onClose, onResumed }: PendingTicketsModalP
 
   async function handleCancelConfirm(admin: UserWithRole, reason: string) {
     if (!cancelTarget) return;
-    const ok = await cancelSale(cancelTarget.id, admin.id, reason);
+    const ok = await cancelSale(cancelTarget.id, admin.id, admin.name, reason);
     if (ok) {
       setTickets(prev => prev.filter(t => t.id !== cancelTarget.id));
     }

@@ -122,7 +122,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
 
   async function handleCancelConfirm(admin: UserWithRole, reason: string) {
     if (!sale) return;
-    const ok = await cancelSale(sale.id, admin.id, reason);
+    const ok = await cancelSale(sale.id, admin.id, admin.name, reason);
     if (ok) setIsCancelled(true);
     setShowCancelPin(false);
   }
