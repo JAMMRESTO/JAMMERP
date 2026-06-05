@@ -17,6 +17,7 @@ interface SalesSummary {
   total_sales: number;
   sales_count: number;
   by_method: Record<PaymentMethod, number>;
+  by_category: { name: string; count: number; total: number }[];
 }
 
 interface CashClosureModalProps {
@@ -76,6 +77,11 @@ function buildXCaisseHtml(params: {
   ${row('Orange Money', fmt(session.total_orange_money))}
   ${row('Carte', fmt(session.total_card))}
   <hr class="sep">
+  ${summary.by_category.length > 0 ? `
+  <div class="section-title">VENTES PAR CATEGORIE</div>
+  ${summary.by_category.map(cat => row(`${cat.name} (${cat.count})`, fmt(cat.total))).join('\n')}
+  <hr class="sep">
+  ` : ''}
   <div class="section-title">COMPTAGE CAISSE</div>
   ${row('Fonds initial', fmt(session.opening_balance))}
   ${row('Espèces attendues', fmt(session.expected_cash))}
@@ -123,7 +129,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
   const sym = settings.currency_symbol;
 
   const [step, setStep] = useState<'review' | 'count' | 'confirm' | 'done'>('review');
-  const [summary, setSummary] = useState<SalesSummary>({ total_sales: 0, sales_count: 0, by_method: { cash: 0, wave: 0, orange_money: 0, card: 0 } });
+  const [summary, setSummary] = useState<SalesSummary>({ total_sales: 0, sales_count: 0, by_method: { cash: 0, wave: 0, orange_money: 0, card: 0 }, by_category: [] });
   const [openingBalance, setOpeningBalance] = useState('');
   const [actualCash, setActualCash] = useState('');
   const [notes, setNotes] = useState('');
@@ -134,7 +140,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
   useEffect(() => {
     async function loadSummary() {
       setLoading(true);
-      // Récupère toutes les ventes payées depuis l'ouverture de session
+      // Recupere toutes les ventes payees depuis l'ouverture de session
       const { data: salesData } = await supabase
         .from('sales')
         .select('id, total')
@@ -146,20 +152,41 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
       const totalSales = (salesData ?? []).reduce((s, v) => s + v.total, 0);
 
       const byMethod: Record<PaymentMethod, number> = { cash: 0, wave: 0, orange_money: 0, card: 0 };
+      let byCategory: { name: string; count: number; total: number }[] = [];
 
       if (saleIds.length > 0) {
-        const { data: paymentsData } = await supabase
-          .from('payments')
-          .select('method, amount')
-          .eq('site_id', siteId)
-          .in('sale_id', saleIds);
+        const [{ data: paymentsData }, { data: itemsData }] = await Promise.all([
+          supabase
+            .from('payments')
+            .select('method, amount')
+            .eq('site_id', siteId)
+            .in('sale_id', saleIds),
+          supabase
+            .from('sale_items')
+            .select('quantity, subtotal, product:products(category:categories(name))')
+            .eq('site_id', siteId)
+            .in('sale_id', saleIds),
+        ]);
 
         for (const p of paymentsData ?? []) {
           byMethod[p.method as PaymentMethod] = (byMethod[p.method as PaymentMethod] ?? 0) + p.amount;
         }
+
+        // Aggregate by category
+        const catMap = new Map<string, { count: number; total: number }>();
+        for (const item of itemsData ?? []) {
+          const catName = (item as any).product?.category?.name ?? 'Sans categorie';
+          const existing = catMap.get(catName) ?? { count: 0, total: 0 };
+          existing.count += item.quantity;
+          existing.total += item.subtotal;
+          catMap.set(catName, existing);
+        }
+        byCategory = Array.from(catMap.entries())
+          .map(([name, data]) => ({ name, ...data }))
+          .sort((a, b) => b.total - a.total);
       }
 
-      setSummary({ total_sales: totalSales, sales_count: saleIds.length, by_method: byMethod });
+      setSummary({ total_sales: totalSales, sales_count: saleIds.length, by_method: byMethod, by_category: byCategory });
       setLoading(false);
     }
     loadSummary();
@@ -296,7 +323,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
                     </div>
 
                     {/* Détail par méthode */}
-                    <div className="space-y-1.5 mb-5">
+                    <div className="space-y-1.5 mb-4">
                       {METHOD_CONFIG.map(m => (
                         <div key={m.id} className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
                           <div className="flex items-center gap-2">
@@ -309,6 +336,26 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
                         </div>
                       ))}
                     </div>
+
+                    {/* Ventes par catégorie */}
+                    {summary.by_category.length > 0 && (
+                      <div className="mb-5">
+                        <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Ventes par categorie</p>
+                        <div className="space-y-1 max-h-40 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                          {summary.by_category.map(cat => (
+                            <div key={cat.name} className="flex items-center justify-between py-1.5 px-3 bg-white/3 rounded-lg border border-white/5">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-white/70 text-xs truncate">{cat.name}</span>
+                                <span className="text-white/25 text-[10px] flex-shrink-0">{cat.count} art.</span>
+                              </div>
+                              <span className="text-white font-semibold text-xs flex-shrink-0 ml-2">
+                                {fmt(cat.total, sym)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <button onClick={() => setStep('count')}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-sm transition-colors">

@@ -62,8 +62,37 @@ function POSInner() {
   const [showPendingTickets, setShowPendingTickets] = useState(false);
   const [showCashClosure, setShowCashClosure] = useState(false);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
-  const [sessionOpenedAt, setSessionOpenedAt] = useState<string>(() => new Date().toISOString());
+  const [sessionOpenedAt, setSessionOpenedAt] = useState<string>('');
   const [pendingCount, setPendingCount] = useState(0);
+
+  // Load session opening time from the last closed session
+  useEffect(() => {
+    async function loadSessionStart() {
+      if (!siteId) return;
+      const { data } = await supabase
+        .from('cash_sessions')
+        .select('closed_at')
+        .eq('site_id', siteId)
+        .eq('status', 'closed')
+        .order('closed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data?.closed_at) {
+        setSessionOpenedAt(data.closed_at);
+        localStorage.setItem(`pos_session_opened_${siteId}`, data.closed_at);
+      } else {
+        // No prior session: use a far-back date to capture all sales
+        const fallback = '2020-01-01T00:00:00.000Z';
+        setSessionOpenedAt(fallback);
+        localStorage.setItem(`pos_session_opened_${siteId}`, fallback);
+      }
+    }
+    // Try localStorage first for instant display, then validate from DB
+    const cached = siteId ? localStorage.getItem(`pos_session_opened_${siteId}`) : null;
+    if (cached) setSessionOpenedAt(cached);
+    loadSessionStart();
+  }, [siteId]);
 
   const loadData = useCallback(async () => {
     if (!siteId) return;
@@ -490,14 +519,15 @@ function POSInner() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showCashClosure && (
+        {showCashClosure && sessionOpenedAt && (
           <CashClosureModal
             openedAt={sessionOpenedAt}
             onClose={() => setShowCashClosure(false)}
             onClosed={(_session: CashSession) => {
               setShowCashClosure(false);
-              // Démarre une nouvelle session
-              setSessionOpenedAt(new Date().toISOString());
+              const now = new Date().toISOString();
+              setSessionOpenedAt(now);
+              if (siteId) localStorage.setItem(`pos_session_opened_${siteId}`, now);
             }}
           />
         )}

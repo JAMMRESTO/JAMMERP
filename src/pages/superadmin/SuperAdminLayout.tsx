@@ -2,21 +2,23 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Building2, Globe, Users, ShieldCheck,
-  LogOut, ChevronRight, Menu, X, Search,
+  LogOut, ChevronRight, Menu, X, Search, Database,
 } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
 import { SuperAdminDashboard } from './SuperAdminDashboard';
 import { TenantsPage } from './TenantsPage';
 import { SuperAdminUsersPage } from './SuperAdminUsersPage';
 import { TenantExplorerPage } from './TenantExplorerPage';
+import { SuperAdminBackupsPage } from './SuperAdminBackupsPage';
 
-type SAPage = 'dashboard' | 'tenants' | 'explorer' | 'users';
+type SAPage = 'dashboard' | 'tenants' | 'explorer' | 'users' | 'backups';
 
 const navItems: { id: SAPage; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Vue d\'ensemble', icon: LayoutDashboard },
   { id: 'tenants',   label: 'Tenants',          icon: Building2 },
   { id: 'explorer',  label: 'Explorer',          icon: Search },
   { id: 'users',     label: 'Super Admins',      icon: ShieldCheck },
+  { id: 'backups',   label: 'Sauvegardes',       icon: Database },
 ];
 
 export function SuperAdminLayout() {
@@ -30,6 +32,7 @@ export function SuperAdminLayout() {
       case 'tenants':   return <TenantsPage />;
       case 'explorer':  return <TenantExplorerPage />;
       case 'users':     return <SuperAdminUsersPage />;
+      case 'backups':   return <SuperAdminBackupsPage />;
     }
   }
 

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Store, DollarSign, Palette, Puzzle, Receipt, Save, Check, Users, Phone, MapPin, FileText, Building2, LayoutDashboard, Upload, X, ShoppingCart, Copy, Lock, Eye, EyeOff, type LucideIcon
+  Store, DollarSign, Palette, Puzzle, Receipt, Save, Check, Users, Phone, MapPin, FileText, Building2, LayoutDashboard, Upload, X, ShoppingCart, Copy, Lock, Eye, EyeOff, Shield, type LucideIcon
 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import { useToast } from '../components/ui/Toast';
@@ -223,6 +223,68 @@ function CashierAccessCard({ siteSlug, siteId }: { siteSlug: string; siteId: str
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+function OwnerPinCard() {
+  const { ownerPin, setOwnerPin } = useTenant();
+  const toast = useToast();
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPin.length < 4) { toast('error', 'Le PIN doit contenir au moins 4 chiffres'); return; }
+    if (newPin !== confirmPin) { toast('error', 'Les codes PIN ne correspondent pas'); return; }
+    setSaving(true);
+    const result = await setOwnerPin(newPin);
+    setSaving(false);
+    if (result.error) { toast('error', result.error); return; }
+    toast('success', 'Code PIN mis a jour');
+    setNewPin('');
+    setConfirmPin('');
+  }
+
+  return (
+    <div className="glass-card rounded-2xl p-6 border border-blue-500/15 space-y-4">
+      <h3 className="text-white font-semibold text-base flex items-center gap-2">
+        <Shield size={16} className="text-blue-400/70" /> Code PIN administrateur
+      </h3>
+      <p className="text-white/40 text-xs">
+        Ce code permet de valider les annulations de tickets depuis la caisse sans saisir de mot de passe.
+        {ownerPin ? ' Votre PIN est actuellement configure.' : ' Aucun PIN configure.'}
+      </p>
+      <form onSubmit={handleSave} className="flex flex-col sm:flex-row gap-3">
+        <input
+          type="password"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={6}
+          value={newPin}
+          onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))}
+          placeholder="Nouveau PIN (4 chiffres)"
+          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+        />
+        <input
+          type="password"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={6}
+          value={confirmPin}
+          onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+          placeholder="Confirmer PIN"
+          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+        />
+        <button
+          type="submit"
+          disabled={saving || newPin.length < 4}
+          className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-semibold transition-all flex-shrink-0"
+        >
+          {saving ? '...' : (ownerPin ? 'Modifier' : 'Definir')}
+        </button>
+      </form>
     </div>
   );
 }
@@ -503,6 +565,9 @@ export function SettingsPage() {
             {currentSite && (
               <CashierAccessCard siteSlug={currentSite.slug} siteId={currentSite.id} />
             )}
+
+            {/* Owner PIN */}
+            <OwnerPinCard />
             </>
             )}
           </div>

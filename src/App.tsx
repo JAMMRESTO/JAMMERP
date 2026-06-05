@@ -10,7 +10,9 @@ import { SitePicker } from './components/auth/SitePicker';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { MainLayout } from './components/layout/MainLayout';
 import { SuperAdminLayout } from './pages/superadmin/SuperAdminLayout';
+import { SetPinModal } from './components/pos/SetPinModal';
 import { Loader2 } from 'lucide-react';
+import { useState } from 'react';
 
 function isSubscriptionExpired(tenant: { subscription_expires_at: string | null }): boolean {
   if (!tenant.subscription_expires_at) return false;
@@ -20,9 +22,10 @@ function isSubscriptionExpired(tenant: { subscription_expires_at: string | null 
 function AppContent() {
   const {
     authUser, isAuthLoading, isSuperAdmin, isSiteManager, tenant,
-    currentSite, isLoadingTenant, isOnboardingDone,
+    currentSite, isLoadingTenant, isOnboardingDone, ownerPin,
   } = useTenant();
   const { currentUser, isLoading: isAuthPINLoading } = useAuth();
+  const [pinDismissed, setPinDismissed] = useState(false);
 
   // 1. Supabase Auth loading
   if (isAuthLoading) return <LoadingScreen />;
@@ -49,7 +52,15 @@ function AppContent() {
   if (!isOnboardingDone) return <TenantOnboardingScreen />;
 
   // 8. Tenant owner (not a site manager) → bypass PIN screen, enter app directly
-  if (!isSiteManager) return <MainLayout />;
+  //    But first, prompt them to set a PIN if they haven't yet
+  if (!isSiteManager) {
+    return (
+      <>
+        {!ownerPin && !pinDismissed && <SetPinModal onDone={() => setPinDismissed(true)} />}
+        <MainLayout />
+      </>
+    );
+  }
 
   // 9. Site manager: PIN auth loading
   if (isAuthPINLoading) return <LoadingScreen />;
@@ -58,7 +69,13 @@ function AppContent() {
   if (!currentUser) return <LoginScreen />;
 
   // 11. Everything ready → main app
-  return <MainLayout />;
+  //     Prompt site manager to set their admin PIN if missing
+  return (
+    <>
+      {!ownerPin && !pinDismissed && <SetPinModal onDone={() => setPinDismissed(true)} />}
+      <MainLayout />
+    </>
+  );
 }
 
 function LoadingScreen() {

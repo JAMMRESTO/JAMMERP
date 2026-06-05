@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, ReactNode, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User as SupabaseUser, Session as SupabaseSession } from '@supabase/supabase-js';
 import type { Tenant, Site, RestaurantSettings } from '../types/database';
@@ -11,6 +11,7 @@ interface SiteManager {
   tenant_id: string;
   email: string;
   name: string;
+  pin: string;
   is_active: boolean;
 }
 
@@ -29,6 +30,9 @@ interface TenantContextType {
   allowedModules: AllowedModules;
 
   isOnboardingDone: boolean;
+
+  ownerPin: string;
+  setOwnerPin: (pin: string) => Promise<{ error?: string }>;
 
   currentSite: Site | null;
   selectSite: (site: Site) => void;
@@ -57,12 +61,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isSiteManager, setIsSiteManager] = useState(false);
   const [siteManager, setSiteManager] = useState<SiteManager | null>(null);
+  const [ownerPin, setOwnerPinState] = useState('');
 
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [currentSite, setCurrentSite] = useState<Site | null>(null);
   const [isLoadingTenant, setIsLoadingTenant] = useState(false);
   const [isOnboardingDone, setIsOnboardingDone] = useState(false);
+  const lastInitUserId = useRef<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -81,8 +87,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (authUser) {
+      // Skip re-init on token refresh if same user
+      if (lastInitUserId.current === authUser.id) return;
+      lastInitUserId.current = authUser.id;
       initUser(authUser.id);
     } else {
+      lastInitUserId.current = null;
       setIsSuperAdmin(false);
       setIsSiteManager(false);
       setSiteManager(null);
@@ -132,6 +142,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       const sm = smRow as SiteManager;
       setIsSiteManager(true);
       setSiteManager(sm);
+      setOwnerPinState(sm.pin ?? '');
       await loadTenantDataForSiteManager(sm);
       setIsLoadingTenant(false);
       return;
@@ -219,6 +230,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       return;
     }
     setTenant(tenantData as Tenant);
+    setOwnerPinState((tenantData as any).owner_pin ?? '');
 
     if (tenantData.status === 'active' && tenantData.is_active) {
       const { data: sitesData } = await supabase
@@ -329,6 +341,25 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     return {};
   }
 
+  async function setOwnerPin(pin: string): Promise<{ error?: string }> {
+    if (isSiteManager && siteManager) {
+      const { error } = await supabase
+        .from('site_managers')
+        .update({ pin })
+        .eq('id', siteManager.id);
+      if (error) return { error: error.message };
+      setSiteManager(prev => prev ? { ...prev, pin } : prev);
+    } else if (tenant) {
+      const { error } = await supabase
+        .from('tenants')
+        .update({ owner_pin: pin })
+        .eq('id', tenant.id);
+      if (error) return { error: error.message };
+    }
+    setOwnerPinState(pin);
+    return {};
+  }
+
   const allowedModules = useMemo<AllowedModules>(() => {
     const defaults: AllowedModules = {
       pos: true, delivery: true, kitchen: true,
@@ -344,6 +375,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       isSuperAdmin, isSiteManager, siteManager,
       tenant, sites, isLoadingTenant, allowedModules,
       isOnboardingDone,
+      ownerPin, setOwnerPin,
       currentSite, selectSite, clearSite,
       signIn, signUp, signOut,
       createSite, updateSite,
