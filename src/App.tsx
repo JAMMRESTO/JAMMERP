@@ -16,6 +16,7 @@ import { Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { usePWA } from './lib/usePWA';
 import { useSettings } from './context/SettingsContext';
+import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 
 function isSubscriptionExpired(tenant: { subscription_expires_at: string | null }): boolean {
   if (!tenant.subscription_expires_at) return false;
@@ -31,42 +32,54 @@ function AppContent() {
   const { settings } = useSettings();
   const [pinDismissed, setPinDismissed] = useState(false);
 
-  usePWA({
-    tenantName: settings.restaurant_name && settings.restaurant_name !== 'Mon Restaurant'
-      ? settings.restaurant_name
-      : tenant?.name || null,
+  const resolvedName = settings.restaurant_name && settings.restaurant_name !== 'Mon Restaurant'
+    ? settings.restaurant_name
+    : tenant?.name || null;
+
+  const { showBanner, promptInstall, dismiss } = usePWA({
+    tenantName: resolvedName,
     logoUrl: settings.logo_url,
   });
 
+  const installBanner = showBanner ? (
+    <PWAInstallBanner
+      tenantName={resolvedName || 'SENRESTO'}
+      logoUrl={settings.logo_url}
+      onInstall={promptInstall}
+      onDismiss={dismiss}
+    />
+  ) : null;
+
   // 1. Supabase Auth loading
-  if (isAuthLoading) return <LoadingScreen />;
+  if (isAuthLoading) return <>{installBanner}<LoadingScreen /></>;
 
   // 2. Not logged in → login/signup screen
-  if (!authUser) return <TenantLoginScreen />;
+  if (!authUser) return <>{installBanner}<TenantLoginScreen /></>;
 
   // 3. Tenant data loading
-  if (isLoadingTenant) return <LoadingScreen />;
+  if (isLoadingTenant) return <>{installBanner}<LoadingScreen /></>;
 
   // 4. Super admin → bypass tenant flow
-  if (isSuperAdmin) return <SuperAdminLayout />;
+  if (isSuperAdmin) return <>{installBanner}<SuperAdminLayout /></>;
 
   // 5. Tenant exists but not yet active (pending/approved/rejected/suspended)
-  if (tenant && tenant.status !== 'active') return <TenantPendingScreen />;
+  if (tenant && tenant.status !== 'active') return <>{installBanner}<TenantPendingScreen /></>;
 
   // 5b. Tenant active but subscription expired → blocked
-  if (tenant && isSubscriptionExpired(tenant)) return <TenantExpiredScreen />;
+  if (tenant && isSubscriptionExpired(tenant)) return <>{installBanner}<TenantExpiredScreen /></>;
 
   // 6. Active tenant but no site → site picker
-  if (!tenant || !currentSite) return <SitePicker />;
+  if (!tenant || !currentSite) return <>{installBanner}<SitePicker /></>;
 
   // 7. Site exists but onboarding not done → onboarding wizard
-  if (!isOnboardingDone) return <TenantOnboardingScreen />;
+  if (!isOnboardingDone) return <>{installBanner}<TenantOnboardingScreen /></>;
 
   // 8. Tenant owner (not a site manager) → bypass PIN screen, enter app directly
   //    But first, prompt them to set a PIN if they haven't yet
   if (!isSiteManager) {
     return (
       <>
+        {installBanner}
         {!ownerPin && !pinDismissed && <SetPinModal onDone={() => setPinDismissed(true)} />}
         <MainLayout />
       </>
@@ -74,15 +87,16 @@ function AppContent() {
   }
 
   // 9. Site manager: PIN auth loading
-  if (isAuthPINLoading) return <LoadingScreen />;
+  if (isAuthPINLoading) return <>{installBanner}<LoadingScreen /></>;
 
   // 10. Site manager: no staff PIN logged in → PIN login screen
-  if (!currentUser) return <LoginScreen />;
+  if (!currentUser) return <>{installBanner}<LoginScreen /></>;
 
   // 11. Everything ready → main app
   //     Prompt site manager to set their admin PIN if missing
   return (
     <>
+      {installBanner}
       {!ownerPin && !pinDismissed && <SetPinModal onDone={() => setPinDismissed(true)} />}
       <MainLayout />
     </>

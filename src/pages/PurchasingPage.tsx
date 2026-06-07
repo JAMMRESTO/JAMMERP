@@ -37,30 +37,34 @@ export function PurchasingPage() {
   const [recipeItems, setRecipeItems] = useState<RecipeItem[]>([]);
 
   const loadData = useCallback(async () => {
-    if (!siteId) return;
+    if (!siteId) { setLoading(false); return; }
     setLoading(true);
 
-    const [suppRes, ordRes, itemsRes, invRes, lossRes, ingRes, prodRes, recRes, riRes] = await Promise.all([
-      supabase.from('suppliers').select('*').eq('site_id', siteId).order('name'),
-      supabase.from('purchase_orders').select('*').eq('site_id', siteId).order('created_at', { ascending: false }),
-      supabase.from('purchase_order_items').select('*').eq('site_id', siteId),
-      supabase.from('supplier_invoices').select('*').eq('site_id', siteId).order('invoice_date', { ascending: false }),
-      supabase.from('losses').select('*').eq('site_id', siteId).order('declared_at', { ascending: false }),
-      supabase.from('ingredients').select('*').eq('site_id', siteId).eq('is_active', true).order('name'),
-      supabase.from('products').select('*').eq('site_id', siteId).eq('is_available', true).order('name'),
-      supabase.from('recipes').select('*').eq('site_id', siteId).eq('is_active', true).order('name'),
-      supabase.from('recipe_items').select('*').eq('site_id', siteId),
-    ]);
+    try {
+      const [suppRes, ordRes, itemsRes, invRes, lossRes, ingRes, prodRes, recRes, riRes] = await Promise.all([
+        supabase.from('suppliers').select('*').eq('site_id', siteId).order('name'),
+        supabase.from('purchase_orders').select('*').eq('site_id', siteId).order('created_at', { ascending: false }),
+        supabase.from('purchase_order_items').select('*').eq('site_id', siteId),
+        supabase.from('supplier_invoices').select('*').eq('site_id', siteId).order('invoice_date', { ascending: false }),
+        supabase.from('losses').select('*').eq('site_id', siteId).order('declared_at', { ascending: false }),
+        supabase.from('ingredients').select('*').eq('site_id', siteId).eq('is_active', true).order('name'),
+        supabase.from('products').select('*').eq('site_id', siteId).eq('is_available', true).order('name'),
+        supabase.from('recipes').select('*').eq('site_id', siteId).eq('is_active', true).order('name'),
+        supabase.from('recipe_items').select('*').eq('site_id', siteId),
+      ]);
 
-    if (suppRes.data) setSuppliers(suppRes.data as Supplier[]);
-    if (ordRes.data) setOrders(ordRes.data as PurchaseOrder[]);
-    if (itemsRes.data) setOrderItems(itemsRes.data as PurchaseOrderItem[]);
-    if (invRes.data) setInvoices(invRes.data as SupplierInvoice[]);
-    if (lossRes.data) setLosses(lossRes.data as Loss[]);
-    if (ingRes.data) setIngredients(ingRes.data as Ingredient[]);
-    if (prodRes.data) setProducts(prodRes.data as Product[]);
-    if (recRes.data) setRecipes(recRes.data as Recipe[]);
-    if (riRes.data) setRecipeItems(riRes.data as RecipeItem[]);
+      setSuppliers((suppRes.data ?? []) as Supplier[]);
+      setOrders((ordRes.data ?? []) as PurchaseOrder[]);
+      setOrderItems((itemsRes.data ?? []) as PurchaseOrderItem[]);
+      setInvoices((invRes.data ?? []) as SupplierInvoice[]);
+      setLosses((lossRes.data ?? []) as Loss[]);
+      setIngredients((ingRes.data ?? []) as Ingredient[]);
+      setProducts((prodRes.data ?? []) as Product[]);
+      setRecipes((recRes.data ?? []) as Recipe[]);
+      setRecipeItems((riRes.data ?? []) as RecipeItem[]);
+    } catch (err) {
+      console.warn('[PurchasingPage] Failed to load data:', err);
+    }
 
     setLoading(false);
   }, [siteId]);
