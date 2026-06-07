@@ -17,6 +17,7 @@ import { ProductionPage } from '../../pages/ProductionPage';
 import { ReportsPage } from '../../pages/ReportsPage';
 import { OnlineOrdersPage } from '../../pages/OnlineOrdersPage';
 import { CashSessionsPage } from '../../pages/CashSessionsPage';
+import { PurchasingPage } from '../../pages/PurchasingPage';
 import { ComingSoon } from '../ui/ComingSoon';
 
 export function MainLayout() {
@@ -47,7 +48,7 @@ export function MainLayout() {
   }
 
   const isPOS = activePage === 'pos';
-  const isFullHeight = ['products', 'categories', 'inventory', 'tables', 'kitchen', 'delivery', 'production', 'reports', 'online_orders', 'cash_sessions'].includes(activePage);
+  const isFullHeight = ['products', 'categories', 'inventory', 'tables', 'kitchen', 'delivery', 'production', 'purchasing', 'reports', 'online_orders', 'cash_sessions'].includes(activePage);
 
   function renderPage() {
     switch (activePage) {
@@ -61,6 +62,7 @@ export function MainLayout() {
       case 'kitchen': return <KitchenPage />;
       case 'delivery': return <DeliveryPage />;
       case 'production': return <ProductionPage />;
+      case 'purchasing': return <PurchasingPage />;
       case 'reports':       return <ReportsPage />;
       case 'online_orders': return <OnlineOrdersPage />;
       case 'cash_sessions': return <CashSessionsPage />;

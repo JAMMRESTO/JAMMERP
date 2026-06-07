@@ -11,8 +11,11 @@ import { LoginScreen } from './components/auth/LoginScreen';
 import { MainLayout } from './components/layout/MainLayout';
 import { SuperAdminLayout } from './pages/superadmin/SuperAdminLayout';
 import { SetPinModal } from './components/pos/SetPinModal';
+import { AdminResetPage } from './pages/AdminResetPage';
 import { Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { usePWA } from './lib/usePWA';
+import { useSettings } from './context/SettingsContext';
 
 function isSubscriptionExpired(tenant: { subscription_expires_at: string | null }): boolean {
   if (!tenant.subscription_expires_at) return false;
@@ -25,7 +28,15 @@ function AppContent() {
     currentSite, isLoadingTenant, isOnboardingDone, ownerPin,
   } = useTenant();
   const { currentUser, isLoading: isAuthPINLoading } = useAuth();
+  const { settings } = useSettings();
   const [pinDismissed, setPinDismissed] = useState(false);
+
+  usePWA({
+    tenantName: settings.restaurant_name && settings.restaurant_name !== 'Mon Restaurant'
+      ? settings.restaurant_name
+      : tenant?.name || null,
+    logoUrl: settings.logo_url,
+  });
 
   // 1. Supabase Auth loading
   if (isAuthLoading) return <LoadingScreen />;
@@ -100,6 +111,18 @@ function ProvidersTree() {
 }
 
 export default function App() {
+  const [hash, setHash] = useState(window.location.hash);
+
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  if (hash === '#admin-reset') {
+    return <AdminResetPage />;
+  }
+
   return (
     <ToastProvider>
       <TenantProvider>

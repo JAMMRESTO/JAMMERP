@@ -51,12 +51,20 @@ function getInitials(name: string) {
 async function callSuperAdminFn(action: string, params: Record<string, unknown>) {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
+  if (!token) {
+    console.warn('[super-admin-fn] No session token available for action:', action);
+    return { error: 'No session' };
+  }
   const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/super-admin-users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ action, ...params }),
   });
-  return res.json();
+  const json = await res.json();
+  if (!res.ok) {
+    console.warn('[super-admin-fn]', action, 'failed:', res.status, json);
+  }
+  return json;
 }
 
 // ─── Reveal cell (PIN or password) ─────────────────────────────────────────
@@ -597,7 +605,7 @@ export function TenantExplorerPage() {
       supabase.from('tenants').select('*').order('name'),
       supabase.from('sites').select('*').order('name'),
       supabase.from('users').select('*, role:roles(id, name, label, color)').order('name'),
-      callSuperAdminFn('list_all_owner_emails', {}),
+      callSuperAdminFn('list_all_owner_emails', {}).catch(() => ({ error: 'network' })),
     ]);
 
     const allTenants = (tenantsRes.data ?? []) as Tenant[];
@@ -605,6 +613,9 @@ export function TenantExplorerPage() {
     const allUsers   = (usersRes.data  ?? []) as StaffUser[];
 
     // Build ownerEmail map: tenantId -> email
+    if (ownerEmailsRes.error) {
+      console.warn('[Explorer] Owner emails fetch failed:', ownerEmailsRes.error);
+    }
     const emailByOwnerId: Record<string, string> = ownerEmailsRes.emailByOwnerId ?? {};
     const ownerIdByTenantId: Record<string, string> = ownerEmailsRes.ownerIdByTenantId ?? {};
     const emailByTenantId: Record<string, string> = {};

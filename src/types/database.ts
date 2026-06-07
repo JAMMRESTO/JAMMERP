@@ -614,6 +614,102 @@ export interface CashSessionWithCashiers extends CashSession {
 }
 
 // ============================================================
+// PURCHASING & SUPPLIERS
+// ============================================================
+export interface Supplier {
+  id: string;
+  site_id: string | null;
+  name: string;
+  contact_name: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PurchaseOrderStatus = 'draft' | 'ordered' | 'partial' | 'received' | 'cancelled';
+
+export interface PurchaseOrder {
+  id: string;
+  site_id: string | null;
+  order_number: number;
+  supplier_id: string | null;
+  status: PurchaseOrderStatus;
+  order_date: string;
+  expected_date: string | null;
+  received_date: string | null;
+  total_amount: number;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PurchaseOrderWithSupplier extends PurchaseOrder {
+  supplier: Pick<Supplier, 'id' | 'name'> | null;
+}
+
+export interface PurchaseOrderItem {
+  id: string;
+  site_id: string | null;
+  purchase_order_id: string;
+  ingredient_id: string | null;
+  product_id: string | null;
+  description: string;
+  quantity_ordered: number;
+  quantity_received: number;
+  unit: string;
+  unit_price: number;
+  total_price: number;
+  created_at: string;
+}
+
+export type InvoiceStatus = 'pending' | 'paid' | 'overdue';
+
+export interface SupplierInvoice {
+  id: string;
+  site_id: string | null;
+  invoice_number: string;
+  supplier_id: string | null;
+  purchase_order_id: string | null;
+  invoice_date: string;
+  due_date: string | null;
+  total_amount: number;
+  status: InvoiceStatus;
+  notes: string;
+  created_at: string;
+}
+
+export interface SupplierInvoiceWithSupplier extends SupplierInvoice {
+  supplier: Pick<Supplier, 'id' | 'name'> | null;
+}
+
+// ============================================================
+// LOSSES / WASTE
+// ============================================================
+export type LossReason = 'breakage' | 'expiry' | 'production_error' | 'other';
+
+export interface Loss {
+  id: string;
+  site_id: string | null;
+  product_id: string | null;
+  ingredient_id: string | null;
+  item_name: string;
+  quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+  reason: LossReason;
+  notes: string;
+  declared_by: string | null;
+  declared_at: string;
+  created_at: string;
+}
+
+// ============================================================
 // DATABASE (Supabase generated types stub)
 // ============================================================
 export interface Database {

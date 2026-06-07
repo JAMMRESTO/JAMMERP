@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, ShoppingCart, Utensils, Truck, Package,
   BarChart2, Calendar, Settings, LogOut, ChefHat,
-  FlaskConical, Building2, Tag, Lock,
+  FlaskConical, Building2, Tag, Lock, Receipt,
   type LucideIcon
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -32,6 +32,7 @@ export const navConfig: NavItem[] = [
   { id: 'delivery',     label: 'Livraisons',           icon: Truck,           roles: ['admin'],            module: 'delivery' },
   { id: 'inventory',    label: 'Inventaire',           icon: FlaskConical,    roles: ['admin'],            module: 'inventory' },
   { id: 'production',   label: 'Production',           icon: FlaskConical,    roles: ['admin'],            module: 'production' },
+  { id: 'purchasing',   label: 'Achats & Fournisseurs', icon: Receipt,         roles: ['admin'],            module: 'inventory' },
   { id: 'reports',      label: 'Rapports',             icon: BarChart2,       roles: ['admin'],            module: 'reports' },
   { id: 'online_orders', label: 'Commandes en ligne',  icon: Calendar,        roles: ['admin'],            module: 'reservations' },
   { id: 'cash_sessions', label: 'Fermetures de caisse', icon: Lock,           roles: ['admin'],            module: 'pos' },
