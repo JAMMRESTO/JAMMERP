@@ -12,13 +12,11 @@ export function SuperAdminProfilePage() {
   const [emailSuccess, setEmailSuccess] = useState('');
   const [emailError, setEmailError] = useState('');
 
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordSuccess, setPasswordSuccess] = useState('');
   const [passwordError, setPasswordError] = useState('');
-  const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
 
   async function handleEmailUpdate(e: React.FormEvent) {
@@ -63,27 +61,18 @@ export function SuperAdminProfilePage() {
 
     setPasswordSaving(true);
 
-    if (currentPassword) {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: authUser?.email ?? '',
-        password: currentPassword,
-      });
-      if (signInError) {
-        setPasswordError('Mot de passe actuel incorrect');
-        setPasswordSaving(false);
-        return;
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+
+      if (error) {
+        setPasswordError(error.message);
+      } else {
+        setPasswordSuccess('Mot de passe mis a jour avec succes. Utilisez le nouveau mot de passe a la prochaine connexion.');
+        setNewPassword('');
+        setConfirmPassword('');
       }
-    }
-
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-
-    if (error) {
-      setPasswordError(error.message);
-    } else {
-      setPasswordSuccess('Mot de passe mis a jour avec succes');
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+    } catch (err: any) {
+      setPasswordError(err?.message ?? 'Erreur inattendue');
     }
     setPasswordSaving(false);
   }
@@ -164,26 +153,6 @@ export function SuperAdminProfilePage() {
         </div>
 
         <div className="space-y-3">
-          <div>
-            <label className="text-white/50 text-xs font-medium block mb-1.5">Mot de passe actuel</label>
-            <div className="relative">
-              <input
-                type={showCurrent ? 'text' : 'password'}
-                value={currentPassword}
-                onChange={e => setCurrentPassword(e.target.value)}
-                className="w-full px-3 py-2.5 pr-10 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-amber-500/50 transition-colors"
-                placeholder="Mot de passe actuel"
-              />
-              <button
-                type="button"
-                onClick={() => setShowCurrent(!showCurrent)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
-              >
-                {showCurrent ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-          </div>
-
           <div>
             <label className="text-white/50 text-xs font-medium block mb-1.5">Nouveau mot de passe</label>
             <div className="relative">
