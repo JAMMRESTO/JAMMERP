@@ -379,9 +379,9 @@ function NewOrderModal({ onClose, onCreated, taxRate, sym }: {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 16 }}
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        className="w-full max-w-2xl bg-gray-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+        className="w-full max-w-2xl bg-gray-900 border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/8 flex-shrink-0">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-white/8 flex-shrink-0">
           <h2 className="text-white font-bold text-base">Nouvelle commande en ligne</h2>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/80 transition-all">
             <X size={16} />
@@ -485,7 +485,7 @@ function NewOrderModal({ onClose, onCreated, taxRate, sym }: {
               {prodLoading ? (
                 <div className="flex items-center justify-center py-8"><Loader2 size={20} className="text-white/30 animate-spin" /></div>
               ) : (
-                <div className="grid grid-cols-2 gap-1.5 max-h-72 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-72 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
                   {filteredProducts.map(p => {
                     const inCart = cartItems.find(i => i.product_id === p.id);
                     return (
@@ -650,7 +650,7 @@ export function OnlineOrdersPage() {
 
         {/* Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-40">
+          <div className="relative flex-1 min-w-0">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Chercher une commande..."
@@ -717,13 +717,13 @@ export function OnlineOrdersPage() {
           </div>
         ) : viewMode === 'board' ? (
           /* ── KANBAN BOARD ── */
-          <div className="h-full overflow-x-auto p-4">
-            <div className="flex gap-3 h-full" style={{ minWidth: `${BOARD_COLUMNS.length * 220}px` }}>
+          <div className="h-full overflow-x-auto p-2 sm:p-4" style={{ WebkitOverflowScrolling: 'touch' }}>
+            <div className="flex gap-2 sm:gap-3 h-full" style={{ minWidth: `${BOARD_COLUMNS.length * 180}px` }}>
               {BOARD_COLUMNS.map(status => {
                 const colOrders = filtered.filter(o => o.status === status);
                 const cfg = STATUS_CFG[status];
                 return (
-                  <div key={status} className="flex flex-col w-52 flex-shrink-0">
+                  <div key={status} className="flex flex-col w-44 sm:w-52 flex-shrink-0">
                     <div className={`flex items-center gap-2 px-3 py-2 rounded-xl mb-2 ${cfg.bg} border ${cfg.border}`}>
                       <cfg.icon size={13} className={cfg.color} />
                       <span className={`text-xs font-semibold ${cfg.color}`}>{cfg.label}</span>

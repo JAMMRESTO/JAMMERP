@@ -286,7 +286,7 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 flex-1">
           <StatCard label="Chiffre d'affaires" value={`${(totalRevenue/1000).toFixed(1)}K`} sub={sym} color="text-blue-400" />
           <StatCard label="Transactions" value={sales.length} color="text-white" />
           <StatCard label="Ticket moyen" value={`${Math.round(avgTicket).toLocaleString('fr-FR')}`} sub={sym} color="text-emerald-400" />
@@ -307,8 +307,8 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
       </div>
 
       {chartData.length > 0 && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          <div className="xl:col-span-2 glass-card rounded-2xl p-5 border border-white/8">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-2 sm:gap-4">
+          <div className="xl:col-span-2 glass-card rounded-2xl p-3 sm:p-5 border border-white/8">
             <h3 className="text-white font-semibold text-sm mb-4">Évolution des ventes</h3>
             <ResponsiveContainer width="100%" height={180}>
               <AreaChart data={chartData}>
@@ -344,13 +344,13 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
       )}
 
       <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
-          <div className="w-10 text-white/30 text-xs font-medium">#</div>
+        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-b border-white/8 bg-white/3">
+          <div className="w-8 sm:w-10 text-white/30 text-xs font-medium">#</div>
           <div className="flex-1 text-white/30 text-xs font-medium">Client / Table</div>
           <div className="hidden sm:block w-24 text-white/30 text-xs font-medium">Type</div>
           <div className="hidden md:block w-24 text-white/30 text-xs font-medium text-right">Remise</div>
-          <div className="w-28 text-white/30 text-xs font-medium text-right">Total</div>
-          <div className="w-28 text-white/30 text-xs font-medium text-right">Date</div>
+          <div className="w-20 sm:w-28 text-white/30 text-xs font-medium text-right">Total</div>
+          <div className="hidden sm:block w-28 text-white/30 text-xs font-medium text-right">Date</div>
         </div>
         {loading ? (
           Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
@@ -360,10 +360,10 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
             <p className="text-white/30 text-sm">Aucune vente sur cette période</p>
           </div>
         ) : sales.map(s => (
-          <div key={s.id} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
-            <div className="w-10 text-white/40 text-xs font-mono">#{s.sale_number}</div>
+          <div key={s.id} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+            <div className="w-8 sm:w-10 text-white/40 text-[10px] sm:text-xs font-mono">#{s.sale_number}</div>
             <div className="flex-1 min-w-0">
-              <p className="text-white text-sm truncate">{s.customer_name || s.table_number || '—'}</p>
+              <p className="text-white text-xs sm:text-sm truncate">{s.customer_name || s.table_number || '—'}</p>
             </div>
             <div className="hidden sm:block w-24">
               <span className="text-xs text-white/40">{s.sale_type === 'dine_in' ? 'Sur place' : s.sale_type === 'takeaway' ? 'Emporter' : 'Livraison'}</span>
@@ -371,10 +371,10 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
             <div className="hidden md:block w-24 text-right">
               {s.discount_amount > 0 && <span className="text-amber-400 text-xs">-{s.discount_amount.toLocaleString('fr-FR')} {sym}</span>}
             </div>
-            <div className="w-28 text-right">
-              <p className="text-white font-semibold text-sm">{s.total.toLocaleString('fr-FR')} {sym}</p>
+            <div className="w-20 sm:w-28 text-right">
+              <p className="text-white font-semibold text-xs sm:text-sm">{s.total.toLocaleString('fr-FR')} {sym}</p>
             </div>
-            <div className="w-28 text-right">
+            <div className="hidden sm:block w-28 text-right">
               <p className="text-white/40 text-xs">{new Date(s.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</p>
               <p className="text-white/25 text-[10px]">{new Date(s.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
             </div>
@@ -855,7 +855,7 @@ export function ReportsPage() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex-shrink-0 px-4 lg:px-6 pt-4 pb-0 space-y-3">
+      <div className="flex-shrink-0 px-3 sm:px-4 lg:px-6 pt-3 sm:pt-4 pb-0 space-y-3">
         {/* Period filter */}
         <PeriodFilter
           preset={preset}
@@ -885,7 +885,7 @@ export function ReportsPage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-4 scrollbar-thin">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4 scrollbar-thin">
         <AnimatePresence mode="wait">
           <motion.div
             key={`${tab}-${refreshKey}`}

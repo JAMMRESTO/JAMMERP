@@ -79,12 +79,12 @@ function DriverForm({ driver, onSave, onClose }: DriverFormProps) {
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <motion.div
         initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-        className="bg-gray-900 border border-white/10 rounded-3xl p-6 w-full max-w-md shadow-2xl"
+        className="bg-gray-900 border border-white/10 rounded-t-2xl sm:rounded-3xl p-4 sm:p-6 w-full sm:max-w-md shadow-2xl max-h-[90vh] overflow-y-auto"
       >
         <h2 className="text-white font-bold text-lg mb-5">{driver ? 'Modifier le livreur' : 'Nouveau livreur'}</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -236,12 +236,12 @@ function NewDeliveryModal({ drivers, onSave, onClose }: NewDeliveryModalProps) {
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <motion.div
         initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
-        className="bg-gray-900 border border-white/10 rounded-3xl p-6 w-full max-w-lg shadow-2xl"
+        className="bg-gray-900 border border-white/10 rounded-t-2xl sm:rounded-3xl p-4 sm:p-6 w-full sm:max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto"
       >
         <h2 className="text-white font-bold text-lg mb-5">Nouvelle livraison</h2>
         <form onSubmit={handleSubmit} className="space-y-4">

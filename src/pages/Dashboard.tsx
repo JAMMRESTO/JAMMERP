@@ -528,7 +528,7 @@ export function Dashboard() {
             )}
 
             {/* Charts row */}
-            <div className={`grid grid-cols-1 ${showMultiView ? 'xl:grid-cols-5' : 'lg:grid-cols-5'} gap-3 sm:gap-4`}>
+            <div className={`grid grid-cols-1 ${showMultiView ? 'xl:grid-cols-5' : 'lg:grid-cols-5'} gap-2 sm:gap-3 lg:gap-4`}>
               {/* Area/Bar chart */}
               <motion.div
                 initial={{ opacity: 0, y: 16 }}
@@ -616,7 +616,7 @@ export function Dashboard() {
                     <UserCircle2 size={15} className="text-blue-400" />
                   </div>
                 </div>
-                <div className="grid grid-cols-12 px-5 py-2 border-b border-white/5 bg-white/2">
+                <div className="grid grid-cols-12 px-3 sm:px-5 py-2 border-b border-white/5 bg-white/2">
                   <div className="col-span-5 text-white/30 text-[10px] font-medium uppercase tracking-wider">Caissier</div>
                   <div className="col-span-3 text-white/30 text-[10px] font-medium uppercase tracking-wider text-right">Ventes</div>
                   <div className="col-span-4 text-white/30 text-[10px] font-medium uppercase tracking-wider text-right">CA</div>
@@ -635,7 +635,7 @@ export function Dashboard() {
                           initial={{ opacity: 0, x: -8 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: 0.40 + i * 0.05 }}
-                          className="grid grid-cols-12 items-center gap-2 px-5 py-3 hover:bg-white/3 transition-colors"
+                          className="grid grid-cols-12 items-center gap-1 sm:gap-2 px-3 sm:px-5 py-3 hover:bg-white/3 transition-colors"
                         >
                           <div className="col-span-5 flex items-center gap-2.5 min-w-0">
                             <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden" style={{ backgroundColor: barColor + '30', border: `1px solid ${barColor}40` }}>
@@ -660,7 +660,7 @@ export function Dashboard() {
                     });
                   })()}
                 </div>
-                <div className="grid grid-cols-12 items-center px-5 py-3 border-t border-white/8 bg-white/2">
+                <div className="grid grid-cols-12 items-center px-3 sm:px-5 py-3 border-t border-white/8 bg-white/2">
                   <div className="col-span-5 text-white/50 text-xs font-semibold">Total du jour</div>
                   <div className="col-span-3 text-right text-white/40 text-xs">{userRevenues.reduce((s, u) => s + u.count, 0)} tickets</div>
                   <div className="col-span-4 text-right">

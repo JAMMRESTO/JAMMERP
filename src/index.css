@@ -166,3 +166,24 @@
     scrollbar-color: rgba(255,255,255,0.18) rgba(255,255,255,0.03);
   }
 }
+
+@layer utilities {
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+@media (max-width: 639px) {
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: none;
+    border-radius: 4px;
+  }
+}

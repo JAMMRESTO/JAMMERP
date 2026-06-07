@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Building2, Globe, Users, ShieldCheck,
-  LogOut, ChevronRight, Menu, X, Search, Database,
+  LogOut, ChevronRight, Menu, X, Search, Database, UserCog,
 } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
 import { SuperAdminDashboard } from './SuperAdminDashboard';
@@ -10,8 +10,9 @@ import { TenantsPage } from './TenantsPage';
 import { SuperAdminUsersPage } from './SuperAdminUsersPage';
 import { TenantExplorerPage } from './TenantExplorerPage';
 import { SuperAdminBackupsPage } from './SuperAdminBackupsPage';
+import { SuperAdminProfilePage } from './SuperAdminProfilePage';
 
-type SAPage = 'dashboard' | 'tenants' | 'explorer' | 'users' | 'backups';
+type SAPage = 'dashboard' | 'tenants' | 'explorer' | 'users' | 'backups' | 'profile';
 
 const navItems: { id: SAPage; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Vue d\'ensemble', icon: LayoutDashboard },
@@ -19,6 +20,7 @@ const navItems: { id: SAPage; label: string; icon: typeof LayoutDashboard }[] = 
   { id: 'explorer',  label: 'Explorer',          icon: Search },
   { id: 'users',     label: 'Super Admins',      icon: ShieldCheck },
   { id: 'backups',   label: 'Sauvegardes',       icon: Database },
+  { id: 'profile',   label: 'Mon Profil',        icon: UserCog },
 ];
 
 export function SuperAdminLayout() {
@@ -33,6 +35,7 @@ export function SuperAdminLayout() {
       case 'explorer':  return <TenantExplorerPage />;
       case 'users':     return <SuperAdminUsersPage />;
       case 'backups':   return <SuperAdminBackupsPage />;
+      case 'profile':   return <SuperAdminProfilePage />;
     }
   }
 

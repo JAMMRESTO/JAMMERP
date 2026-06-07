@@ -108,9 +108,9 @@ function SessionDetailModal({ session, sym, onClose }: { session: CashSession; s
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-gray-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        className="bg-gray-900 border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md overflow-hidden max-h-[90vh] overflow-y-auto">
 
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
           <div className="flex items-center gap-3">
@@ -274,18 +274,18 @@ export function CashSessionsPage() {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gray-950">
       {/* KPI banner */}
-      <div className="flex-shrink-0 grid grid-cols-3 gap-3 px-4 sm:px-6 py-4 border-b border-white/6 bg-gray-900/40">
+      <div className="flex-shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 px-3 sm:px-6 py-3 sm:py-4 border-b border-white/6 bg-gray-900/40">
         <div className="bg-white/3 rounded-xl p-3 border border-white/6">
           <p className="text-white/40 text-[10px] mb-1">CA total (clôturé)</p>
-          <p className="text-emerald-400 font-black text-lg leading-tight">{fmt(totalRevenue, sym)}</p>
+          <p className="text-emerald-400 font-black text-base sm:text-lg leading-tight">{fmt(totalRevenue, sym)}</p>
         </div>
         <div className="bg-white/3 rounded-xl p-3 border border-white/6">
           <p className="text-white/40 text-[10px] mb-1">Ventes totales</p>
-          <p className="text-white font-black text-lg leading-tight">{totalSales}</p>
+          <p className="text-white font-black text-base sm:text-lg leading-tight">{totalSales}</p>
         </div>
         <div className="bg-white/3 rounded-xl p-3 border border-white/6">
           <p className="text-white/40 text-[10px] mb-1">Fermetures</p>
-          <p className="text-white font-black text-lg leading-tight">{sessions.filter(s => s.status === 'closed').length}</p>
+          <p className="text-white font-black text-base sm:text-lg leading-tight">{sessions.filter(s => s.status === 'closed').length}</p>
         </div>
       </div>
 

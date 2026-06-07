@@ -389,7 +389,7 @@ function TableDetail({ table, order, onClose, onRefresh, onEdit, onTransfer, onR
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className="w-80 flex-shrink-0 border-l border-white/8 bg-gray-950/60 flex flex-col"
+      className="w-full md:w-80 flex-shrink-0 border-l border-white/8 bg-gray-950/60 flex flex-col fixed inset-0 md:static md:inset-auto z-40 md:z-auto"
     >
       <div className="flex items-center justify-between p-5 border-b border-white/8">
         <div>
@@ -602,7 +602,7 @@ export function TablesPage() {
       {/* Main area */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Floor plan */}
-        <div className="flex-1 relative overflow-auto p-4">
+        <div className="flex-1 relative overflow-auto p-2 sm:p-4 -webkit-overflow-scrolling-touch" style={{ WebkitOverflowScrolling: 'touch' }}>
           <div className="relative" style={{ width: 760, height: 500, minWidth: 760, minHeight: 500 }}>
             {/* Grid background */}
             <div
