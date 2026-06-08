@@ -37,7 +37,7 @@ function AppContent() {
     ? settings.restaurant_name
     : tenant?.name || null;
 
-  const { showBanner, promptInstall, dismiss } = usePWA({
+  const { showBanner, showIOSGuide, promptInstall, dismiss } = usePWA({
     tenantName: resolvedName,
     logoUrl: settings.logo_url,
   });
@@ -46,6 +46,7 @@ function AppContent() {
     <PWAInstallBanner
       tenantName={resolvedName || 'SENRESTO'}
       logoUrl={settings.logo_url}
+      showIOSGuide={showIOSGuide}
       onInstall={promptInstall}
       onDismiss={dismiss}
     />

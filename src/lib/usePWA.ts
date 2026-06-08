@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -13,20 +13,42 @@ interface PWAOptions {
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
 let globalListenerAttached = false;
 
+function isStandalone(): boolean {
+  return window.matchMedia('(display-mode: standalone)').matches
+    || (navigator as any).standalone === true;
+}
+
+function isIOS(): boolean {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+}
+
+function isSafari(): boolean {
+  const ua = navigator.userAgent;
+  return /Safari/.test(ua) && !/Chrome|CriOS|FxiOS/.test(ua);
+}
+
 export function usePWA({ tenantName, logoUrl }: PWAOptions) {
   const [canInstall, setCanInstall] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
   const dismissedKey = 'senresto_pwa_dismissed';
   const [isDismissed, setIsDismissed] = useState(() => {
     const stored = localStorage.getItem(dismissedKey);
     if (!stored) return false;
     const dismissed = parseInt(stored, 10);
-    return Date.now() - dismissed < 24 * 60 * 60 * 1000;
+    // Only dismiss for 4 hours (not 24)
+    return Date.now() - dismissed < 4 * 60 * 60 * 1000;
   });
 
   useEffect(() => {
-    if (window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone) {
+    if (isStandalone()) {
       setIsInstalled(true);
+      return;
+    }
+
+    // On iOS Safari, show the manual install guide
+    if (isIOS() && isSafari()) {
+      setShowIOSGuide(true);
       return;
     }
 
@@ -127,7 +149,7 @@ export function usePWA({ tenantName, logoUrl }: PWAOptions) {
     localStorage.setItem(dismissedKey, Date.now().toString());
   }, []);
 
-  const showBanner = canInstall && !isInstalled && !isDismissed;
+  const showBanner = !isInstalled && !isDismissed && (canInstall || showIOSGuide);
 
-  return { canInstall, isInstalled, showBanner, promptInstall, dismiss };
+  return { canInstall, isInstalled, showBanner, showIOSGuide, promptInstall, dismiss };
 }

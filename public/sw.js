@@ -1,5 +1,4 @@
-const CACHE_VERSION = '2';
-const CACHE_NAME = `senresto-v${CACHE_VERSION}`;
+const CACHE_NAME = 'senresto-cache';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
@@ -21,16 +20,17 @@ self.addEventListener('activate', (event) => {
       )
     ).then(() => self.clients.claim())
   );
-  // Notify all clients that an update is active
-  self.clients.matchAll({ type: 'window' }).then((clients) => {
-    clients.forEach((client) => {
-      client.postMessage({ type: 'SW_UPDATED', version: CACHE_VERSION });
-    });
-  });
 });
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  // Never cache build-version.json — always fetch fresh
+  if (event.request.url.includes('build-version.json')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -44,7 +44,6 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// Listen for skip waiting message from client
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
