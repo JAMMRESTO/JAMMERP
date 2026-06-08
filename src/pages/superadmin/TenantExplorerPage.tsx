@@ -11,6 +11,12 @@ import { supabase } from '../../lib/supabase';
 import { useToast } from '../../components/ui/Toast';
 import type { Tenant, Site } from '../../types/database';
 
+function slugify(str: string): string {
+  return (str ?? '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 interface StaffUser {
   id: string;
   name: string;
@@ -299,13 +305,15 @@ function UserRowSA({
 
 function CashierSharedRow({
   site,
+  realEmail,
   onEdit,
 }: {
   site: SiteWithUsers;
+  realEmail?: string;
   onEdit: (target: EditTarget) => void;
 }) {
   if (!site.cashierAuthId && !site.cashierEmail) return null;
-  const email = site.cashierEmail ?? `caisse@${site.slug}.app`;
+  const email = realEmail || site.cashierEmail || `caisse@${slugify(site.slug) || 'site'}.app`;
 
   return (
     <div className="flex items-center gap-3 px-4 py-3 border-b border-amber-500/10 bg-amber-500/4">
@@ -406,7 +414,7 @@ function SitePanel({
               </div>
 
               {/* Cashier shared account */}
-              <CashierSharedRow site={site} onEdit={onEdit} />
+              <CashierSharedRow site={site} realEmail={site.cashierAuthId ? emailById[site.cashierAuthId] : undefined} onEdit={onEdit} />
 
               {/* Staff users */}
               {site.users.length === 0 ? (
@@ -638,7 +646,7 @@ export function TenantExplorerPage() {
       sitesByTenant[s.tenant_id].push({
         ...s,
         users: usersBySite[s.id] ?? [],
-        cashierEmail: s.cashier_auth_user_id ? `caisse@${s.slug}.app` : null,
+        cashierEmail: s.cashier_auth_user_id ? `caisse@${slugify(s.slug) || 'site'}.app` : null,
         cashierAuthId: s.cashier_auth_user_id ?? null,
       });
     }

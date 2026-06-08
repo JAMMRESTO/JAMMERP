@@ -102,9 +102,19 @@ function ApproveModal({
 
     if (tenantErr) { toast('error', tenantErr.message); setSaving(false); return; }
 
+    // Create default site if none exists
     if (tenant.sites.length === 0) {
       const slug = tenant.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
       await supabase.from('sites').insert({ tenant_id: tenant.id, name: tenant.name, slug: slug || 'principal' });
+    }
+
+    // Seed default roles for this tenant
+    const { data: existingRoles } = await supabase.from('roles').select('id').eq('tenant_id', tenant.id).limit(1);
+    if (!existingRoles || existingRoles.length === 0) {
+      await supabase.from('roles').insert([
+        { tenant_id: tenant.id, name: 'admin', label: 'Administrateur', permissions: { all: true }, color: '#EF4444' },
+        { tenant_id: tenant.id, name: 'cashier', label: 'Caissier', permissions: { pos: true, orders: true, reports: true }, color: '#F59E0B' },
+      ]);
     }
 
     toast('success', `"${tenant.name}" approuvé — plan ${plan}, expire le ${formatExpiry(expiryDate.toISOString())}`);

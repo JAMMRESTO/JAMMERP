@@ -12,6 +12,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { SuperAdminLayout } from './pages/superadmin/SuperAdminLayout';
 import { SetPinModal } from './components/pos/SetPinModal';
 import { AdminResetPage } from './pages/AdminResetPage';
+import { UpdateBlocker } from './components/ui/UpdateBlocker';
 import { Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { usePWA } from './lib/usePWA';
@@ -92,12 +93,10 @@ function AppContent() {
   // 10. Site manager: no staff PIN logged in → PIN login screen
   if (!currentUser) return <>{installBanner}<LoginScreen /></>;
 
-  // 11. Everything ready → main app
-  //     Prompt site manager to set their admin PIN if missing
+  // 11. Everything ready → main app (site manager / cashier — no PIN prompt)
   return (
     <>
       {installBanner}
-      {!ownerPin && !pinDismissed && <SetPinModal onDone={() => setPinDismissed(true)} />}
       <MainLayout />
     </>
   );
@@ -140,6 +139,7 @@ export default function App() {
   return (
     <ToastProvider>
       <TenantProvider>
+        <UpdateBlocker />
         <ProvidersTree />
       </TenantProvider>
     </ToastProvider>

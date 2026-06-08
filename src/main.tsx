@@ -5,7 +5,11 @@ import { OrderPage } from './pages/OrderPage.tsx';
 import './index.css';
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js').then((reg) => {
+    // Check for updates immediately then every 60s
+    reg.update();
+    setInterval(() => reg.update(), 60000);
+  }).catch(() => {});
 }
 
 const isOrderPage = window.location.pathname === '/order' || window.location.pathname === '/order/';

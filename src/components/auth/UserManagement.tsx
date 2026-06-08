@@ -115,12 +115,11 @@ function UserForm({
   async function handleSave() {
     if (!form.name.trim()) { toast('error', 'Le nom est requis'); return; }
     if (!user && !form.pin) { toast('error', 'Le PIN est requis'); return; }
-    if (!user && isCashier && form.cashierPassword.length < 6) { toast('error', 'Le mot de passe partagé est requis (min. 6 car.)'); return; }
     if (!user && !isCashier && !form.email.trim()) { toast('error', "L'email est requis"); return; }
     if (!user && !isCashier && form.password.length < 6) { toast('error', 'Le mot de passe doit contenir au moins 6 caractères'); return; }
     const pinErr = form.pin ? validatePin(form.pin) : '';
     if (pinErr) { setPinError(pinErr); return; }
-    if (!form.role_id) { toast('error', 'Le rôle est requis'); return; }
+    if (!form.role_id) { toast('error', 'Aucun rôle disponible. Veuillez contacter le super administrateur.'); return; }
     if (!form.site_id) { toast('error', 'Le site est requis'); return; }
 
     setSaving(true);
@@ -338,14 +337,14 @@ function UserForm({
             <div>
               <label className="flex items-center gap-1.5 text-white/60 text-xs font-medium mb-2">
                 <Lock size={12} />
-                {user ? 'Nouveau mot de passe partagé (laisser vide pour conserver)' : 'Mot de passe partagé (min. 6 car.)'}
+                {user ? 'Nouveau mot de passe partagé (laisser vide pour conserver)' : 'Mot de passe partagé (optionnel)'}
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={form.cashierPassword}
                   onChange={e => setForm(f => ({ ...f, cashierPassword: e.target.value }))}
-                  placeholder={user ? '••••••••' : `Caisse-${slugify(selectedSite?.slug ?? 'site')}-2024!`}
+                  placeholder={`Défaut: Caisse-${slugify(selectedSite?.slug ?? 'site')}-2024!`}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-amber-500/50 focus:bg-white/8 transition-all pr-10 font-mono text-xs"
                 />
                 <button type="button" onClick={() => setShowPassword(s => !s)}
@@ -353,7 +352,7 @@ function UserForm({
                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
-              <p className="text-white/20 text-[10px] mt-1">Ce mot de passe s'applique à tous les caissiers du site.</p>
+              <p className="text-white/20 text-[10px] mt-1">Ce mot de passe s'applique à tous les caissiers du site. Si vide, un mot de passe par défaut sera généré.</p>
             </div>
           </div>
         )}
