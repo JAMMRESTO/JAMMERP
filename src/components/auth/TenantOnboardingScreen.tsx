@@ -122,9 +122,9 @@ function StepRestaurant({
             <input
               type="text"
               value={data.restaurantName}
-              onChange={e => onChange({ restaurantName: e.target.value })}
+              onChange={e => onChange({ restaurantName: e.target.value.toUpperCase() })}
               placeholder={tenant?.name ?? 'Nom du restaurant'}
-              className="w-full bg-white/6 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+              className="w-full bg-white/6 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm uppercase placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
               autoFocus
             />
           </div>
@@ -708,7 +708,7 @@ export function TenantOnboardingScreen() {
               <ChefHat size={20} className="text-white" />
             </div>
             <div>
-              <p className="text-white font-black text-base leading-tight">RestoBar POS</p>
+              <p className="text-white font-black text-base leading-tight">Jamm ERP</p>
               <p className="text-white/30 text-[10px] font-semibold uppercase tracking-widest">Configuration</p>
             </div>
           </div>
@@ -762,7 +762,7 @@ export function TenantOnboardingScreen() {
               <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center">
                 <ChefHat size={15} className="text-white" />
               </div>
-              <span className="text-white font-black text-sm">RestoBar POS</span>
+              <span className="text-white font-black text-sm">Jamm ERP</span>
             </div>
             <button onClick={signOut} className="flex items-center gap-1.5 text-white/30 hover:text-red-400 text-xs transition-colors">
               <LogOut size={13} /> Quitter

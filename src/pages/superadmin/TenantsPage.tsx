@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronUp, Activity, Clock, Check, Ban,
   AlertCircle, ShieldCheck, Users, Calendar, Zap, AlertTriangle,
   RotateCcw, CalendarClock, ShoppingCart, Truck, Utensils,
-  FlaskConical, BarChart2, BookOpen, Package,
+  FlaskConical, BarChart2, BookOpen, Package, AlertOctagon,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../components/ui/Toast';
@@ -779,13 +779,14 @@ function ModulesPanel({ tenant, onSaved }: { tenant: TenantWithSites; onSaved: (
 // ─── Tenant Row ─────────────────────────────────────────────
 
 function TenantRow({
-  tenant, onEdit, onRefresh, onSuspend, onReactivate,
+  tenant, onEdit, onRefresh, onSuspend, onReactivate, onDelete,
 }: {
   tenant: TenantWithSites;
   onEdit: () => void;
   onRefresh: () => void;
   onSuspend: () => void;
   onReactivate: () => void;
+  onDelete: () => void;
 }) {
   const toast = useToast();
   const [expanded, setExpanded] = useState(false);
@@ -884,6 +885,11 @@ function TenantRow({
               className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-white/40 hover:text-white flex items-center justify-center transition-all"
             >
               {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+            <button onClick={onDelete} title="Supprimer définitivement"
+              className="w-8 h-8 rounded-xl bg-white/5 hover:bg-red-500/20 text-white/25 hover:text-red-400 flex items-center justify-center transition-all"
+            >
+              <Trash2 size={13} />
             </button>
           </div>
         </div>
@@ -1088,6 +1094,140 @@ function AutoSuspendConfirmModal({
   );
 }
 
+// ─── Delete Tenant Modal ─────────────────────────────────────
+
+function DeleteTenantModal({
+  tenant, onClose, onDone,
+}: {
+  tenant: TenantWithSites; onClose: () => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const [confirmName, setConfirmName] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [log, setLog] = useState<string[]>([]);
+  const isConfirmed = confirmName.trim().toLowerCase() === tenant.name.trim().toLowerCase();
+
+  async function handleDelete() {
+    if (!isConfirmed) return;
+    setDeleting(true);
+    setLog([]);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast('error', 'Session expirée'); setDeleting(false); return; }
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+
+    const res = await fetch(`${supabaseUrl}/functions/v1/delete-tenant`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ tenantId: tenant.id }),
+    });
+
+    const data = await res.json();
+    setDeleting(false);
+
+    if (!res.ok || data.error) {
+      toast('error', data.error ?? 'Erreur lors de la suppression');
+      return;
+    }
+
+    setLog(data.log ?? []);
+    toast('success', `"${tenant.name}" supprimé définitivement`);
+    setTimeout(() => onDone(), 1200);
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      onClick={e => { if (e.target === e.currentTarget && !deleting) onClose(); }}
+    >
+      <motion.div initial={{ scale: 0.92, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 20 }}
+        className="w-full max-w-md bg-gray-900 border border-red-500/25 rounded-3xl p-6 shadow-2xl"
+      >
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center flex-shrink-0">
+            <AlertOctagon size={18} className="text-red-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-white font-bold">Supprimer définitivement</h3>
+            <p className="text-white/35 text-xs truncate">{tenant.name}</p>
+          </div>
+          {!deleting && (
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/70 transition-all">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        <div className="p-3.5 rounded-xl bg-red-500/8 border border-red-500/20 mb-5 space-y-2">
+          <p className="text-red-300 text-xs font-semibold">Cette action est irréversible et supprimera :</p>
+          <ul className="space-y-1">
+            {[
+              `Le tenant "${tenant.name}" et ses ${tenant.sites.length} site(s)`,
+              'Toutes les ventes, produits, commandes, stocks',
+              'Tous les utilisateurs et comptes associés',
+              'Toutes les données opérationnelles',
+            ].map((item, i) => (
+              <li key={i} className="flex items-start gap-2 text-[11px] text-red-400/80">
+                <span className="text-red-500 mt-0.5 flex-shrink-0">•</span> {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {log.length > 0 ? (
+          <div className="p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20 space-y-1 mb-4">
+            {log.map((line, i) => (
+              <p key={i} className="flex items-center gap-2 text-xs text-emerald-400">
+                <Check size={11} className="flex-shrink-0" /> {line}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <div className="mb-5">
+            <label className="block text-white/50 text-xs font-medium mb-2">
+              Tapez <span className="text-white font-bold font-mono">{tenant.name.trim()}</span> pour confirmer
+            </label>
+            <input
+              type="text"
+              value={confirmName}
+              onChange={e => setConfirmName(e.target.value)}
+              placeholder={tenant.name}
+              disabled={deleting}
+              className="w-full bg-white/6 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-red-500/40 transition-all disabled:opacity-50"
+              autoFocus
+            />
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          {!deleting && log.length === 0 && (
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/50 text-sm hover:bg-white/5 transition-all">
+              Annuler
+            </button>
+          )}
+          {log.length === 0 && (
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              onClick={handleDelete}
+              disabled={!isConfirmed || deleting}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {deleting
+                ? <><Loader2 size={14} className="animate-spin" />Suppression...</>
+                : <><Trash2 size={14} />Supprimer définitivement</>
+              }
+            </motion.button>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Main Page ──────────────────────────────────────────────
 
 type Tab = 'pending' | 'all';
@@ -1104,6 +1244,7 @@ export function TenantsPage() {
   const [rejectingTenant, setRejectingTenant] = useState<TenantWithSites | null>(null);
   const [suspendingTenant, setSuspendingTenant] = useState<TenantWithSites | null>(null);
   const [reactivatingTenant, setReactivatingTenant] = useState<TenantWithSites | null>(null);
+  const [deletingTenant, setDeletingTenant] = useState<TenantWithSites | null>(null);
   const [showAutoSuspend, setShowAutoSuspend] = useState(false);
 
   async function load() {
@@ -1293,6 +1434,7 @@ export function TenantsPage() {
                   onRefresh={load}
                   onSuspend={() => setSuspendingTenant(tenant)}
                   onReactivate={() => setReactivatingTenant(tenant)}
+                  onDelete={() => setDeletingTenant(tenant)}
                 />
               ))}
             </div>
@@ -1313,6 +1455,9 @@ export function TenantsPage() {
         )}
         {reactivatingTenant && (
           <ReactivateModal tenant={reactivatingTenant} onClose={() => setReactivatingTenant(null)} onDone={() => { setReactivatingTenant(null); load(); }} />
+        )}
+        {deletingTenant && (
+          <DeleteTenantModal tenant={deletingTenant} onClose={() => setDeletingTenant(null)} onDone={() => { setDeletingTenant(null); load(); }} />
         )}
         {showAutoSuspend && (
           <AutoSuspendConfirmModal

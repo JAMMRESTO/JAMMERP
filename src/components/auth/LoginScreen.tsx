@@ -596,7 +596,7 @@ export function LoginScreen() {
             </motion.button>
           </div>
           <p className="text-white/10 text-[10px]">
-            &copy; {new Date().getFullYear()} RestoBar POS — Accès réservé au personnel autorisé
+            &copy; {new Date().getFullYear()} Jamm ERP — Accès réservé au personnel autorisé
           </p>
         </div>
       </div>

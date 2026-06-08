@@ -73,14 +73,14 @@ export function PurchasingPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <Loader2 size={24} className="animate-spin text-white/30" />
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Tab bar */}
       <div className="flex-shrink-0 border-b border-white/[0.06] bg-gray-950/50 backdrop-blur-sm px-3 sm:px-4 lg:px-6">
         <div className="flex gap-1 overflow-x-auto py-2 scrollbar-hide">

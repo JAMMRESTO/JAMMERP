@@ -67,7 +67,7 @@ export function TenantPendingScreen() {
             <ChefHat size={20} className="text-white" />
           </div>
           <div>
-            <p className="text-white font-black text-base leading-tight">RestoBar POS</p>
+            <p className="text-white font-black text-base leading-tight">Jamm ERP</p>
             <p className="text-white/30 text-[10px] font-semibold uppercase tracking-widest">Plateforme multi-sites</p>
           </div>
         </motion.div>
