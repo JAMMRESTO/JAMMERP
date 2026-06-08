@@ -40,17 +40,35 @@ function useNotifications(userId: string | undefined) {
   const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
   const previousCountRef = useRef<number | null>(null);
 
+  const speechUnlocked = useRef(false);
+
+  const unlockSpeech = useCallback(() => {
+    if (speechUnlocked.current || !('speechSynthesis' in window)) return;
+    const unlock = new SpeechSynthesisUtterance('');
+    unlock.volume = 0;
+    window.speechSynthesis.speak(unlock);
+    speechUnlocked.current = true;
+  }, []);
+
+  useEffect(() => {
+    const handler = () => { unlockSpeech(); };
+    document.addEventListener('click', handler, { once: true });
+    return () => document.removeEventListener('click', handler);
+  }, [unlockSpeech]);
+
   const speakNotification = useCallback((tenantName?: string) => {
     if (!('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
-    const msg = new SpeechSynthesisUtterance(
-      `Vous avez reçu une nouvelle demande de création de compte${tenantName ? `, de la part de ${tenantName}` : ''}`
-    );
-    msg.lang = 'fr-FR';
-    msg.rate = 0.95;
-    msg.pitch = 1.0;
-    msg.volume = 1.0;
-    window.speechSynthesis.speak(msg);
+    setTimeout(() => {
+      const msg = new SpeechSynthesisUtterance(
+        `Vous avez reçu une nouvelle demande de création de compte${tenantName ? `, de la part de ${tenantName}` : ''}`
+      );
+      msg.lang = 'fr-FR';
+      msg.rate = 0.95;
+      msg.pitch = 1.0;
+      msg.volume = 1.0;
+      window.speechSynthesis.speak(msg);
+    }, 100);
   }, []);
 
   async function load() {
@@ -90,6 +108,7 @@ function useNotifications(userId: string | undefined) {
       if (result) previousCountRef.current = result.newCount;
     });
 
+    // Realtime subscription
     const channel = supabase
       .channel('sa-notifications')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tenants' }, (payload) => {
@@ -99,10 +118,19 @@ function useNotifications(userId: string | undefined) {
         }
         load();
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tenants' }, load)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tenants' }, () => load())
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Polling fallback every 30s (in case realtime is blocked by RLS)
+    const poll = setInterval(async () => {
+      const result = await load();
+      if (result && previousCountRef.current !== null && result.newCount > previousCountRef.current) {
+        speakNotification();
+      }
+      if (result) previousCountRef.current = result.newCount;
+    }, 30000);
+
+    return () => { supabase.removeChannel(channel); clearInterval(poll); };
   }, [userId]);
 
   async function markAsSeen() {
