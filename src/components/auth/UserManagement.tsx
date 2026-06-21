@@ -87,6 +87,14 @@ function UserForm({
   const [saving, setSaving] = useState(false);
   const [pinError, setPinError] = useState('');
 
+  // If roles load after form initialization, update the default role_id
+  useEffect(() => {
+    if (!form.role_id && roles.length > 0) {
+      const cashierRole = roles.find(r => r.name === 'cashier');
+      setForm(f => ({ ...f, role_id: cashierRole?.id ?? roles[0].id }));
+    }
+  }, [roles]);
+
   const selectedRole = roles.find(r => r.id === form.role_id);
   const isCashier = selectedRole?.name === 'cashier';
   const selectedSite = sites.find(s => s.id === form.site_id);

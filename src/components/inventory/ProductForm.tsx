@@ -47,6 +47,7 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
   });
 
   const [newVariant, setNewVariant] = useState('');
+  const [newVariantPrice, setNewVariantPrice] = useState('');
   const [imagePreview, setImagePreview] = useState(product?.image_url ?? '');
 
   const margin = form.price > 0
@@ -66,12 +67,22 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
 
   function addVariant() {
     if (!newVariant.trim()) return;
-    setForm(f => ({ ...f, variants: [...f.variants, { label: newVariant.trim() }] }));
+    const price = newVariantPrice ? parseFloat(newVariantPrice) || undefined : undefined;
+    setForm(f => ({ ...f, variants: [...f.variants, { label: newVariant.trim(), price }] }));
     setNewVariant('');
+    setNewVariantPrice('');
   }
 
   function removeVariant(i: number) {
     setForm(f => ({ ...f, variants: f.variants.filter((_, idx) => idx !== i) }));
+  }
+
+  function updateVariantPrice(i: number, value: string) {
+    const price = value ? parseFloat(value) || undefined : undefined;
+    setForm(f => ({
+      ...f,
+      variants: f.variants.map((v, idx) => idx === i ? { ...v, price } : v),
+    }));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -259,23 +270,45 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                   value={newVariant}
                   onChange={e => setNewVariant(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVariant(); } }}
-                  placeholder="Ex: Sans piment, Grande portion..."
+                  placeholder="Ex: Grande portion..."
                   className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+                />
+                <input
+                  type="number"
+                  value={newVariantPrice}
+                  onChange={e => setNewVariantPrice(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVariant(); } }}
+                  placeholder="Prix"
+                  min={0}
+                  step={50}
+                  className="w-24 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
                 />
                 <button type="button" onClick={addVariant} className="px-3 py-2 rounded-xl bg-white/8 hover:bg-blue-600/30 text-white/60 hover:text-white transition-all">
                   <Plus size={15} />
                 </button>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {form.variants.map((v, i) => (
-                  <span key={i} className="flex items-center gap-1.5 text-xs bg-blue-500/10 border border-blue-500/20 text-blue-300 px-2.5 py-1 rounded-xl">
-                    {v.label}
-                    <button type="button" onClick={() => removeVariant(i)} className="text-blue-400/50 hover:text-red-400 transition-colors">
-                      <X size={11} />
-                    </button>
-                  </span>
-                ))}
-              </div>
+              {form.variants.length > 0 && (
+                <div className="space-y-1.5">
+                  {form.variants.map((v, i) => (
+                    <div key={i} className="flex items-center gap-2 bg-blue-500/5 border border-blue-500/15 rounded-xl px-3 py-1.5">
+                      <span className="text-sm text-blue-200 flex-1 truncate">{v.label}</span>
+                      <input
+                        type="number"
+                        value={v.price ?? ''}
+                        onChange={e => updateVariantPrice(i, e.target.value)}
+                        placeholder={String(form.price || 0)}
+                        min={0}
+                        step={50}
+                        className="w-20 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs text-right placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+                      />
+                      <button type="button" onClick={() => removeVariant(i)} className="text-blue-400/50 hover:text-red-400 transition-colors">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                  <p className="text-white/25 text-[10px] mt-1">Laissez vide pour utiliser le prix par defaut ({form.price.toLocaleString('fr-FR')})</p>
+                </div>
+              )}
             </div>
           </div>
 

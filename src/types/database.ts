@@ -118,6 +118,7 @@ export interface Category {
 
 export interface ProductVariant {
   label: string;
+  price?: number;
 }
 
 export interface Product {
@@ -707,6 +708,28 @@ export interface Loss {
   declared_by: string | null;
   declared_at: string;
   created_at: string;
+}
+
+// ============================================================
+// EXPENSES
+// ============================================================
+export type ExpensePaymentMethod = 'cash' | 'wave' | 'orange_money' | 'card' | 'bank_transfer';
+
+export interface Expense {
+  id: string;
+  site_id: string | null;
+  expense_number: number;
+  category: string;
+  description: string;
+  amount: number;
+  payment_method: ExpensePaymentMethod;
+  reference: string;
+  recipient: string;
+  notes: string;
+  expense_date: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // ============================================================

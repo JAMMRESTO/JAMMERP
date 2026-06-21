@@ -97,6 +97,21 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Get staff users (public.users) who have their own auth accounts
+    // Admin users have id matching auth.users; cashiers share one account (already collected above)
+    if (siteIds.length > 0) {
+      const { data: staffUsers } = await supabaseAdmin
+        .from("users")
+        .select("id, email")
+        .in("site_id", siteIds);
+      for (const u of (staffUsers ?? [])) {
+        const staff = u as { id: string; email: string | null };
+        // Staff users with individual auth accounts have their own id in auth.users
+        // We add all of them — deleteUser will simply fail silently for IDs not in auth.users
+        if (staff.id) authUserIds.add(staff.id);
+      }
+    }
+
     const deleteLog: string[] = [];
 
     // Delete all sites (CASCADE deletes all operational data: products, sales, orders, etc.)

@@ -8,7 +8,7 @@ import { useSettings } from '../../context/SettingsContext';
 
 interface VariantModalProps {
   product: Product;
-  onSelect: (variant: string) => void;
+  onSelect: (variant: string, price?: number) => void;
   onClose: () => void;
   sym: string;
 }
@@ -63,19 +63,22 @@ function VariantModal({ product, onSelect, onClose, sym }: VariantModalProps) {
           <div className="p-5 pt-4">
             <p className="text-white/40 text-xs font-medium mb-3 uppercase tracking-wider">Choisir une variante</p>
             <div className="flex flex-col gap-2">
-              {variants.map(v => (
-                <motion.button
-                  key={v.label}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => { onSelect(v.label); onClose(); }}
-                  className="w-full px-4 py-3 rounded-2xl bg-white/5 hover:bg-blue-600/20 border border-white/10 hover:border-blue-500/40 text-white text-sm font-medium text-left transition-all flex items-center justify-between group"
-                >
-                  <span>{v.label}</span>
-                  <span className="text-white/20 group-hover:text-blue-400 text-xs transition-colors">
-                    {product.price.toLocaleString('fr-FR')} {sym}
-                  </span>
-                </motion.button>
-              ))}
+              {variants.map(v => {
+                const displayPrice = v.price ?? product.price;
+                return (
+                  <motion.button
+                    key={v.label}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => { onSelect(v.label, v.price); onClose(); }}
+                    className="w-full px-4 py-3 rounded-2xl bg-white/5 hover:bg-blue-600/20 border border-white/10 hover:border-blue-500/40 text-white text-sm font-medium text-left transition-all flex items-center justify-between group"
+                  >
+                    <span>{v.label}</span>
+                    <span className={`text-xs transition-colors ${v.price && v.price !== product.price ? 'text-amber-400 font-semibold' : 'text-white/20 group-hover:text-blue-400'}`}>
+                      {displayPrice.toLocaleString('fr-FR')} {sym}
+                    </span>
+                  </motion.button>
+                );
+              })}
             </div>
             <button
               onClick={onClose}
@@ -110,8 +113,8 @@ function ProductCard({ product }: ProductCardProps) {
     triggerAdd('');
   }
 
-  function triggerAdd(variant: string) {
-    addToCart(product, variant);
+  function triggerAdd(variant: string, price?: number) {
+    addToCart(product, variant, price);
     setAdded(true);
     setTimeout(() => setAdded(false), 600);
   }

@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, ShoppingCart, Utensils, Truck, Package,
   BarChart2, Calendar, Settings, LogOut, ChefHat,
-  FlaskConical, Building2, Tag, Lock, Receipt,
+  FlaskConical, Building2, Tag, Lock, Receipt, Wallet,
   type LucideIcon
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -25,8 +25,9 @@ interface NavItem {
 export const navConfig: NavItem[] = [
   { id: 'dashboard',    label: 'Tableau de bord',      icon: LayoutDashboard, roles: ['admin'] },
   { id: 'pos',          label: 'Point de vente',       icon: ShoppingCart,    module: 'pos' },
+  { id: 'expenses',     label: 'Depenses',             icon: Wallet,          module: 'pos' },
   { id: 'products',     label: 'Produits',             icon: Package,         roles: ['admin'] },
-  { id: 'categories',   label: 'Catégories',           icon: Tag,             roles: ['admin'] },
+  { id: 'categories',   label: 'Categories',           icon: Tag,             roles: ['admin'] },
   { id: 'tables',       label: 'Tables',               icon: Building2,       roles: ['admin'] },
   { id: 'kitchen',      label: 'Commandes',            icon: Utensils,        roles: ['admin', 'cashier'], module: 'kitchen' },
   { id: 'delivery',     label: 'Livraisons',           icon: Truck,           roles: ['admin'],            module: 'delivery' },
@@ -36,7 +37,7 @@ export const navConfig: NavItem[] = [
   { id: 'reports',      label: 'Rapports',             icon: BarChart2,       roles: ['admin'],            module: 'reports' },
   { id: 'online_orders', label: 'Commandes en ligne',  icon: Calendar,        roles: ['admin'],            module: 'reservations' },
   { id: 'cash_sessions', label: 'Fermetures de caisse', icon: Lock,           roles: ['admin'],            module: 'pos' },
-  { id: 'settings',     label: 'Paramètres',           icon: Settings,        roles: ['admin'] },
+  { id: 'settings',     label: 'Parametres',           icon: Settings,        roles: ['admin'] },
 ];
 
 export function isPageAllowed(

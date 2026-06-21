@@ -17,6 +17,13 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const { email, password, tenantName, plan } = body;
 
+    // Define which modules each plan allows
+    const PLAN_MODULES: Record<string, Record<string, boolean>> = {
+      starter: { pos: true, delivery: false, kitchen: false, inventory: false, reports: true, reservations: false, production: false },
+      pro: { pos: true, delivery: true, kitchen: true, inventory: true, reports: true, reservations: false, production: false },
+      enterprise: { pos: true, delivery: true, kitchen: true, inventory: true, reports: true, reservations: true, production: true },
+    };
+
     if (!email || !password || !tenantName) {
       return new Response(
         JSON.stringify({ error: "Email, mot de passe et nom du restaurant requis" }),
@@ -62,13 +69,17 @@ Deno.serve(async (req: Request) => {
         .replace(/\s+/g, "-")
         .replace(/[^a-z0-9-]/g, "") + `-${Date.now()}`;
 
+    const selectedPlan = plan ?? "starter";
+    const allowedModules = PLAN_MODULES[selectedPlan] ?? PLAN_MODULES.starter;
+
     const { error: tenantErr } = await adminClient.from("tenants").insert({
       name: tenantName,
       slug,
       owner_id: newAuth.user.id,
-      plan: plan ?? "starter",
+      plan: selectedPlan,
       status: "pending",
       is_active: false,
+      allowed_modules: allowedModules,
     });
 
     if (tenantErr) {

@@ -4,7 +4,7 @@ import {
   TrendingUp, ShoppingBag, DollarSign, Receipt, Users,
   ArrowUpRight, ArrowDownRight, RefreshCw, AlertTriangle,
   Package, ChefHat, Truck, Clock, CheckCircle2, UserCircle2,
-  Building2, Globe, LayoutGrid,
+  Building2, Globe, LayoutGrid, Wallet,
   type LucideIcon
 } from 'lucide-react';
 import {
@@ -285,7 +285,7 @@ export function Dashboard() {
         ? q.eq('site_id', siteIds[0])
         : q.in('site_id', siteIds);
 
-    const [todaySales, yestSales, weekSales, saleItems, orders, lowProducts, lowIngredients, salesByUser, allUsers] = await Promise.all([
+    const [todaySales, yestSales, weekSales, saleItems, orders, lowProducts, lowIngredients, salesByUser, allUsers, todayExpenses, yestExpenses] = await Promise.all([
       sf(supabase.from('sales').select('total, site_id')).eq('status','paid').gte('created_at', today+'T00:00:00').lte('created_at', today+'T23:59:59'),
       sf(supabase.from('sales').select('total')).eq('status','paid').gte('created_at', yesterday+'T00:00:00').lte('created_at', yesterday+'T23:59:59'),
       sf(supabase.from('sales').select('total, created_at, site_id')).eq('status','paid').gte('created_at', weekAgo+'T00:00:00'),
@@ -295,6 +295,8 @@ export function Dashboard() {
       sf(supabase.from('ingredients').select('name, stock, low_stock_threshold')).eq('is_active',true).gt('low_stock_threshold',0).lte('stock',0).limit(10),
       sf(supabase.from('sales').select('cashier_id, total, site_id')).eq('status','paid').gte('created_at', today+'T00:00:00').lte('created_at', today+'T23:59:59'),
       sf(supabase.from('users').select('id, name, avatar_url')).eq('is_active',true),
+      sf(supabase.from('expenses').select('amount')).gte('expense_date', today).lte('expense_date', today),
+      sf(supabase.from('expenses').select('amount')).gte('expense_date', yesterday).lte('expense_date', yesterday),
     ]);
 
     // ─── Aggregated KPIs ───────────────────────────────────────
@@ -304,13 +306,17 @@ export function Dashboard() {
     const yestCount    = yestSales.data?.length ?? 0;
     const avgTicket    = todayCount > 0 ? Math.round(todayRevenue / todayCount) : 0;
     const yestAvg      = yestCount  > 0 ? Math.round(yestRevenue  / yestCount)  : 0;
+    const todayExpTotal = (todayExpenses.data ?? []).reduce((s, r: {amount: number}) => s + Number(r.amount), 0);
+    const yestExpTotal  = (yestExpenses.data ?? []).reduce((s, r: {amount: number}) => s + Number(r.amount), 0);
+    const todayNet = todayRevenue - todayExpTotal;
+    const yestNet  = yestRevenue - yestExpTotal;
 
     setKpis([
       { label: "Chiffre d'affaires", value: `${todayRevenue.toLocaleString('fr-FR')} ${sym}`, rawValue: todayRevenue, change: pct(todayRevenue, yestRevenue), icon: DollarSign, color: '#3B82F6', bg: '#3B82F620' },
       { label: 'Commandes',          value: String(todayCount), rawValue: todayCount, change: pct(todayCount, yestCount), icon: ShoppingBag, color: '#10B981', bg: '#10B98120' },
-      { label: 'Bénéfice estimé',    value: `${Math.round(todayRevenue * 0.35).toLocaleString('fr-FR')} ${sym}`, rawValue: todayRevenue * 0.35, change: pct(todayRevenue, yestRevenue), icon: TrendingUp, color: '#F59E0B', bg: '#F59E0B20' },
-      { label: 'Ticket moyen',       value: `${avgTicket.toLocaleString('fr-FR')} ${sym}`, rawValue: avgTicket, change: pct(avgTicket, yestAvg), icon: Receipt, color: '#EF4444', bg: '#EF444420' },
-      { label: 'Sites actifs',       value: String(querySites.length), rawValue: querySites.length, change: 0, icon: Building2, color: '#06B6D4', bg: '#06B6D420' },
+      { label: 'Depenses',           value: `${todayExpTotal.toLocaleString('fr-FR')} ${sym}`, rawValue: todayExpTotal, change: pct(todayExpTotal, yestExpTotal), icon: Wallet, color: '#EF4444', bg: '#EF444420' },
+      { label: 'Benefice net',       value: `${todayNet.toLocaleString('fr-FR')} ${sym}`, rawValue: todayNet, change: pct(todayNet, yestNet), icon: TrendingUp, color: '#F59E0B', bg: '#F59E0B20' },
+      { label: 'Ticket moyen',       value: `${avgTicket.toLocaleString('fr-FR')} ${sym}`, rawValue: avgTicket, change: pct(avgTicket, yestAvg), icon: Receipt, color: '#06B6D4', bg: '#06B6D420' },
     ]);
 
     // ─── Per-site stats ────────────────────────────────────────

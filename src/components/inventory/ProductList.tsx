@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Pencil, Trash2, AlertTriangle,
-  CheckCircle2, XCircle, Filter, Package, TrendingUp,
-  ChevronDown, X
+  CheckCircle2, XCircle, Filter, Package,
+  ChevronDown, X, Download, Upload, FileSpreadsheet
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../ui/Toast';
 import { useSettings } from '../../context/SettingsContext';
+import { useTenant } from '../../context/TenantContext';
 import type { Product, Category } from '../../types/database';
 
 interface StockBadgeProps {
@@ -151,10 +153,16 @@ interface ProductListProps {
 
 export function ProductList({ products, categories, onEdit, onNew, onRefresh }: ProductListProps) {
   const toast = useToast();
+  const { currentSite } = useTenant();
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('');
   const [filterStock, setFilterStock] = useState<'all' | 'low' | 'out' | 'ok'>('all');
   const [showFilters, setShowFilters] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importPreview, setImportPreview] = useState<Array<Record<string, string>>>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const catMap = new Map(categories.map(c => [c.id, c]));
 
@@ -186,6 +194,190 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
     onRefresh();
   }
 
+  function handleExportXLS() {
+    const data = products.map(p => {
+      const cat = p.category_id ? catMap.get(p.category_id) : undefined;
+      return {
+        nom: p.name,
+        code: p.product_code,
+        categorie: cat?.name ?? '',
+        prix: p.price,
+        cout: p.cost_price,
+        stock: p.stock ?? '',
+        seuil_alerte: p.low_stock_threshold,
+        unite: p.unit,
+        suivi_stock: p.track_stock ? 'oui' : 'non',
+        disponible: p.is_available ? 'oui' : 'non',
+        description: p.description,
+        variantes: (p.variants ?? []).map(v => v.price ? `${v.label}:${v.price}` : v.label).join(';'),
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const colWidths = [
+      { wch: 28 }, { wch: 12 }, { wch: 18 }, { wch: 10 }, { wch: 10 },
+      { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
+      { wch: 30 }, { wch: 30 },
+    ];
+    ws['!cols'] = colWidths;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Produits');
+    XLSX.writeFile(wb, `produits_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast('success', `${products.length} produit(s) exporté(s)`);
+  }
+
+  function handleDownloadTemplate() {
+    const templateData = [
+      { nom: 'Poulet Yassa', code: 'YASS-001', categorie: 'Plats', prix: 3500, cout: 1200, stock: 50, seuil_alerte: 10, unite: 'portion', suivi_stock: 'oui', disponible: 'oui', description: 'Poulet marine au citron et oignons', variantes: 'Normal;Grande portion:4500' },
+      { nom: 'Jus Bissap', code: 'BISS-001', categorie: 'Boissons', prix: 500, cout: 150, stock: 100, seuil_alerte: 20, unite: 'pièce', suivi_stock: 'oui', disponible: 'oui', description: 'Jus de bissap frais', variantes: 'Petit:500;Grand:800' },
+      { nom: 'Thieboudienne', code: 'THIE-001', categorie: 'Plats', prix: 2500, cout: 900, stock: '', seuil_alerte: 5, unite: 'portion', suivi_stock: 'non', disponible: 'oui', description: '', variantes: '' },
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    ws['!cols'] = [
+      { wch: 28 }, { wch: 12 }, { wch: 18 }, { wch: 10 }, { wch: 10 },
+      { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
+      { wch: 30 }, { wch: 30 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Modele');
+    XLSX.writeFile(wb, 'modele_import_produits.xlsx');
+    toast('success', 'Modèle téléchargé');
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const arrayBuffer = ev.target?.result as ArrayBuffer;
+      const wb = XLSX.read(arrayBuffer, { type: 'array' });
+      const sheetName = wb.SheetNames[0];
+      if (!sheetName) { toast('error', 'Fichier vide'); return; }
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+      if (rows.length === 0) {
+        toast('error', 'Le fichier est vide ou ne contient pas de données');
+        return;
+      }
+      const data = rows.map(row => {
+        const obj: Record<string, string> = {};
+        Object.entries(row).forEach(([key, val]) => {
+          obj[key.toLowerCase().replace(/\s+/g, '_')] = String(val ?? '');
+        });
+        return obj;
+      });
+      setImportPreview(data);
+      setImportErrors([]);
+      setShowImportModal(true);
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  }
+
+  async function handleImportConfirm() {
+    if (!currentSite) return;
+    setImporting(true);
+    const errors: string[] = [];
+    const catNameMap = new Map(categories.map(c => [c.name.toLowerCase().trim(), c.id]));
+    let insertedCount = 0;
+    let skippedCount = 0;
+
+    const existingNames = new Set(products.map(p => p.name.toLowerCase().trim()));
+    const existingCodes = new Set(products.filter(p => p.product_code).map(p => p.product_code.toLowerCase().trim()));
+
+    const productsToInsert = importPreview.map((row, idx) => {
+      const name = row['nom'] || row['name'] || '';
+      if (!name) { errors.push(`Ligne ${idx + 2}: nom manquant`); return null; }
+
+      const product_code = row['code'] || row['product_code'] || '';
+
+      if (existingNames.has(name.toLowerCase().trim())) {
+        skippedCount++;
+        return null;
+      }
+      if (product_code && existingCodes.has(product_code.toLowerCase().trim())) {
+        skippedCount++;
+        return null;
+      }
+
+      const catName = (row['categorie'] || row['category'] || '').toLowerCase().trim();
+      const category_id = catName ? (catNameMap.get(catName) ?? null) : null;
+      if (catName && !category_id) { errors.push(`Ligne ${idx + 2}: categorie "${row['categorie'] || row['category']}" introuvable`); }
+
+      const price = parseFloat(row['prix'] || row['price'] || '0') || 0;
+      const cost_price = parseFloat(row['cout'] || row['cost'] || row['cost_price'] || '0') || 0;
+      const stockVal = row['stock'] || '';
+      const stock = stockVal !== '' ? (parseFloat(stockVal) || 0) : null;
+      const low_stock_threshold = parseInt(row['seuil_alerte'] || row['threshold'] || '5') || 5;
+      const unit = row['unite'] || row['unit'] || 'unite';
+      const track_stock = ['oui', 'true', '1', 'yes'].includes((row['suivi_stock'] || row['track_stock'] || 'non').toLowerCase());
+      const is_available = !['non', 'false', '0', 'no'].includes((row['disponible'] || row['available'] || 'oui').toLowerCase());
+      const description = row['description'] || '';
+      const variantStr = row['variantes'] || row['variants'] || '';
+      const variants = variantStr ? variantStr.split(';').filter(Boolean).map(part => {
+        const [label, priceStr] = part.split(':');
+        const price = priceStr ? parseFloat(priceStr) || undefined : undefined;
+        return { label: label.trim(), price };
+      }) : [];
+
+      existingNames.add(name.toLowerCase().trim());
+      if (product_code) existingCodes.add(product_code.toLowerCase().trim());
+
+      return {
+        site_id: currentSite.id,
+        name,
+        product_code,
+        category_id,
+        price,
+        cost_price,
+        stock,
+        low_stock_threshold,
+        unit,
+        track_stock,
+        is_available,
+        description,
+        variants,
+        image_url: '',
+      };
+    }).filter(Boolean);
+
+    if (errors.length > 0 && productsToInsert.length === 0) {
+      if (skippedCount > 0) errors.push(`${skippedCount} produit(s) ignore(s) car deja existant(s)`);
+      setImportErrors(errors);
+      setImporting(false);
+      return;
+    }
+
+    const batchSize = 50;
+    for (let i = 0; i < productsToInsert.length; i += batchSize) {
+      const batch = productsToInsert.slice(i, i + batchSize);
+      const { error } = await supabase.from('products').insert(batch as Record<string, unknown>[]);
+      if (error) {
+        errors.push(`Erreur batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
+      } else {
+        insertedCount += batch.length;
+      }
+    }
+
+    setImporting(false);
+    if (skippedCount > 0) {
+      errors.push(`${skippedCount} produit(s) ignore(s) car deja existant(s)`);
+    }
+    if (errors.length > 0) {
+      setImportErrors(errors);
+    } else {
+      setShowImportModal(false);
+      setImportPreview([]);
+    }
+    if (insertedCount > 0) {
+      toast('success', `${insertedCount} produit(s) importe(s)${skippedCount > 0 ? `, ${skippedCount} doublon(s) ignore(s)` : ''}`);
+      onRefresh();
+    } else if (skippedCount > 0 && insertedCount === 0) {
+      toast('info', `Aucun nouveau produit - ${skippedCount} doublon(s) ignore(s)`);
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
@@ -212,6 +404,34 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
           <ChevronDown size={11} className={`sm:hidden transition-transform ${showFilters ? 'rotate-180' : ''}`} />
           <ChevronDown size={12} className={`hidden sm:block transition-transform ${showFilters ? 'rotate-180' : ''}`} />
         </button>
+        <button
+          onClick={handleExportXLS}
+          className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-xl border bg-white/5 border-white/10 text-white/50 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/10 text-xs sm:text-sm transition-all"
+          title="Exporter Excel"
+        >
+          <Download size={12} className="sm:hidden" />
+          <Download size={14} className="hidden sm:block" />
+          <span className="hidden sm:inline">Exporter</span>
+        </button>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-xl border bg-white/5 border-white/10 text-white/50 hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/10 text-xs sm:text-sm transition-all"
+          title="Importer Excel"
+        >
+          <Upload size={12} className="sm:hidden" />
+          <Upload size={14} className="hidden sm:block" />
+          <span className="hidden sm:inline">Importer</span>
+        </button>
+        <button
+          onClick={handleDownloadTemplate}
+          className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-xl border bg-white/5 border-white/10 text-white/50 hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/10 text-xs sm:text-sm transition-all"
+          title="Télécharger modèle Excel"
+        >
+          <FileSpreadsheet size={12} className="sm:hidden" />
+          <FileSpreadsheet size={14} className="hidden sm:block" />
+          <span className="hidden sm:inline">Modèle</span>
+        </button>
+        <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFileSelect} className="hidden" />
         <button
           onClick={onNew}
           className="flex items-center gap-1 sm:gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-medium shadow-lg shadow-blue-600/25 transition-all"
@@ -331,6 +551,104 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
           </AnimatePresence>
         )}
       </div>
+
+      {/* Import Modal */}
+      <AnimatePresence>
+        {showImportModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+            onClick={() => { setShowImportModal(false); setImportPreview([]); setImportErrors([]); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-gray-900 border border-white/10 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden shadow-2xl"
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
+                <div>
+                  <h3 className="text-white font-semibold text-base">Importer des produits</h3>
+                  <p className="text-white/40 text-xs mt-0.5">{importPreview.length} produit(s) detecte(s)</p>
+                </div>
+                <button
+                  onClick={() => { setShowImportModal(false); setImportPreview([]); setImportErrors([]); }}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                {importErrors.length > 0 && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl space-y-1">
+                    <p className="text-red-400 text-xs font-medium">Avertissements :</p>
+                    {importErrors.slice(0, 10).map((err, i) => (
+                      <p key={i} className="text-red-300/70 text-xs">{err}</p>
+                    ))}
+                    {importErrors.length > 10 && (
+                      <p className="text-red-300/50 text-xs">...et {importErrors.length - 10} autre(s)</p>
+                    )}
+                  </div>
+                )}
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-white/10">
+                        <th className="text-left text-white/40 font-medium pb-2 pr-3">#</th>
+                        <th className="text-left text-white/40 font-medium pb-2 pr-3">Nom</th>
+                        <th className="text-left text-white/40 font-medium pb-2 pr-3">Categorie</th>
+                        <th className="text-right text-white/40 font-medium pb-2 pr-3">Prix</th>
+                        <th className="text-right text-white/40 font-medium pb-2">Stock</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.slice(0, 20).map((row, i) => (
+                        <tr key={i} className="border-b border-white/5">
+                          <td className="py-1.5 pr-3 text-white/30">{i + 1}</td>
+                          <td className="py-1.5 pr-3 text-white">{row['nom'] || row['name'] || '-'}</td>
+                          <td className="py-1.5 pr-3 text-white/60">{row['categorie'] || row['category'] || '-'}</td>
+                          <td className="py-1.5 pr-3 text-right text-white/80">{row['prix'] || row['price'] || '0'}</td>
+                          <td className="py-1.5 text-right text-white/60">{row['stock'] || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {importPreview.length > 20 && (
+                    <p className="text-white/30 text-xs mt-2">...et {importPreview.length - 20} autre(s) produit(s)</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between px-5 py-4 border-t border-white/8 bg-white/2">
+                <p className="text-white/30 text-xs">
+                  Format Excel (.xlsx) - Colonnes : nom, code, categorie, prix, cout, stock, seuil_alerte, unite, suivi_stock, disponible, description, variantes
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setShowImportModal(false); setImportPreview([]); setImportErrors([]); }}
+                    className="px-4 py-2 rounded-xl border border-white/10 text-white/60 text-sm hover:bg-white/5 transition-all"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handleImportConfirm}
+                    disabled={importing || importPreview.length === 0}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:pointer-events-none text-white text-sm font-medium shadow-lg shadow-blue-600/25 transition-all flex items-center gap-2"
+                  >
+                    {importing && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                    {importing ? 'Import en cours...' : `Importer ${importPreview.length} produit(s)`}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -21,7 +21,7 @@ interface POSContextType {
   setSelectedCustomer: (c: Customer | null) => void;
   setOrderNotes: (v: string) => void;
   setDiscountAmount: (v: number) => void;
-  addToCart: (product: Product, variantLabel?: string) => void;
+  addToCart: (product: Product, variantLabel?: string, variantPrice?: number) => void;
   removeFromCart: (itemId: string) => void;
   updateQuantity: (itemId: string, qty: number) => void;
   updateKitchenNote: (itemId: string, note: string) => void;
@@ -64,7 +64,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
   const [lastPayments, setLastPayments] = useState<{ method: PaymentMethod; amount: number; reference?: string }[]>([]);
   const [isPendingResume, setIsPendingResume] = useState(false);
 
-  const addToCart = useCallback((product: Product, variantLabel = '') => {
+  const addToCart = useCallback((product: Product, variantLabel = '', variantPrice?: number) => {
     setCart(prev => {
       const existing = prev.find(
         i => i.product.id === product.id && i.variant_label === variantLabel
@@ -80,7 +80,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
         quantity: 1,
         variant_label: variantLabel,
         kitchen_note: '',
-        unit_price: product.price,
+        unit_price: variantPrice ?? product.price,
       }];
     });
   }, []);

@@ -38,6 +38,12 @@ const PLAN_COLORS: Record<string, string> = {
   enterprise: 'text-emerald-400 bg-emerald-500/12 border-emerald-500/20',
 };
 
+const PLAN_MODULES: Record<string, Record<string, boolean>> = {
+  starter: { pos: true, delivery: false, kitchen: false, inventory: false, reports: true, reservations: false, production: false },
+  pro: { pos: true, delivery: true, kitchen: true, inventory: true, reports: true, reservations: false, production: false },
+  enterprise: { pos: true, delivery: true, kitchen: true, inventory: true, reports: true, reservations: true, production: true },
+};
+
 const STATUS_CONFIG: Record<TenantStatus, { label: string; color: string; icon: React.ReactNode }> = {
   pending:   { label: 'En attente',  color: 'text-amber-400 bg-amber-500/12 border-amber-500/20',   icon: <Clock size={9} /> },
   approved:  { label: 'Approuvé',   color: 'text-sky-400 bg-sky-500/12 border-sky-500/20',          icon: <ShieldCheck size={9} /> },
@@ -94,6 +100,7 @@ function ApproveModal({
         approved_at: new Date().toISOString(),
         approved_by: user?.id ?? null,
         subscription_expires_at: expiryDate.toISOString(),
+        allowed_modules: PLAN_MODULES[plan] ?? PLAN_MODULES.starter,
         suspended_at: null,
         suspension_reason: null,
         updated_at: new Date().toISOString(),
@@ -371,6 +378,7 @@ function ReactivateModal({
       is_active: true,
       plan,
       subscription_expires_at: expiryDate.toISOString(),
+      allowed_modules: PLAN_MODULES[plan] ?? PLAN_MODULES.starter,
       suspended_at: null,
       suspension_reason: null,
       updated_at: new Date().toISOString(),
@@ -473,6 +481,7 @@ function TenantForm({
       slug: form.slug,
       plan: form.plan,
       is_active: form.is_active,
+      allowed_modules: PLAN_MODULES[form.plan] ?? PLAN_MODULES.starter,
       subscription_expires_at: form.subscription_expires_at
         ? new Date(form.subscription_expires_at).toISOString()
         : null,
