@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Trash2, Plus, Minus, X, MessageSquare,
-  Printer, FileText, CreditCard, type LucideIcon
+  Trash2, Plus, Minus, MessageSquare,
+  Printer, CreditCard
 } from 'lucide-react';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
-import type { CartItem } from '../../types/database';
+import { useAuth } from '../../context/AuthContext';
+import { esc, THERMAL_CSS, buildThermalHeader, printViaPopup } from '../../lib/printUtils';
+import type { CartItem, SaleType } from '../../types/database';
 
 function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
   const { removeFromCart, updateQuantity, updateKitchenNote } = usePOS();
@@ -110,20 +112,99 @@ function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
   );
 }
 
+const saleTypeKitchenLabel: Record<SaleType, string> = {
+  dine_in: 'SUR PLACE',
+  takeaway: 'À EMPORTER',
+  delivery: 'VENTE DIRECTE',
+};
+
 interface CartPanelProps {
   onCheckout: () => void;
 }
 
 export function CartPanel({ onCheckout }: CartPanelProps) {
   const {
-    cart, saleType,
-    discountAmount, setDiscountAmount,
+    cart, saleType, tableNumber, customerName, selectedCustomer,
+    discountAmount,
     clearCart, subtotal, taxAmount, total, itemCount,
     orderNotes, setOrderNotes,
     isPendingResume,
   } = usePOS();
   const { settings } = useSettings();
+  const { currentUser } = useAuth();
   const sym = settings.currency_symbol;
+
+  function handlePrintKitchen() {
+    if (cart.length === 0) return;
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+    const row = (left: string, right: string) =>
+      `<div class="row"><span class="lbl">${esc(left)}</span><span class="val">${esc(right)}</span></div>`;
+
+    const headerHtml = buildThermalHeader(settings);
+
+    const clientName = selectedCustomer?.name || customerName;
+
+    const metaHtml = [
+      `<div class="banner">TICKET CUISINE</div>`,
+      row(`Date : ${dateStr}`, `Heure : ${timeStr}`),
+      row('Caissier :', currentUser?.name ?? 'N/A'),
+      row('Type :', saleTypeKitchenLabel[saleType]),
+      ...(saleType === 'dine_in' && tableNumber ? [row('Table :', tableNumber)] : []),
+      ...(saleType !== 'dine_in' && clientName ? [row('Client :', clientName)] : []),
+      `<hr class="sep-solid">`,
+    ].join('\n');
+
+    const itemsHtml = cart.map(item => {
+      const variant = item.variant_label
+        ? `<div style="font-size:11px;padding-left:28px;font-weight:700;">[${esc(item.variant_label)}]</div>`
+        : '';
+      const note = item.kitchen_note
+        ? `<div style="font-size:11px;padding-left:28px;font-style:italic;">>> ${esc(item.kitchen_note)}</div>`
+        : '';
+      return `<div class="item-row" style="font-size:14px;">
+          <span class="qty" style="font-size:15px;">${item.quantity}x</span>
+          <span class="desc" style="font-size:14px;white-space:normal;">${esc(item.product.name)}</span>
+        </div>${variant}${note}`;
+    }).join('');
+
+    const notesHtml = orderNotes.trim()
+      ? [
+          `<hr class="sep">`,
+          `<div class="section-title">NOTE COMMANDE</div>`,
+          `<div style="font-size:12px;font-weight:700;">${esc(orderNotes)}</div>`,
+        ].join('\n')
+      : '';
+
+    const footerHtml = [
+      `<hr class="sep-solid">`,
+      `<div class="footer">Ticket de préparation cuisine</div>`,
+      `<div class="footer">${esc(dateStr)} · ${esc(timeStr)}</div>`,
+    ].join('\n');
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Ticket cuisine</title>
+  <style>${THERMAL_CSS}</style>
+</head>
+<body>
+  ${headerHtml}
+  ${metaHtml}
+  ${itemsHtml}
+  ${notesHtml}
+  ${footerHtml}
+  <script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
+</body>
+</html>`;
+
+    printViaPopup(html);
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-900 border-l border-white/8">
@@ -226,25 +307,24 @@ export function CartPanel({ onCheckout }: CartPanelProps) {
               Encaisser
             </motion.button>
           ) : (
-            <div className="grid grid-cols-3 gap-0 border-t border-white/8">
-              <button className="flex flex-col items-center gap-0.5 sm:gap-1 py-2.5 sm:py-3 text-white/50 hover:text-white/80 hover:bg-white/5 transition-all border-r border-white/8 text-[9px] sm:text-[10px] font-medium">
-                <Printer size={12} className="sm:hidden" />
-                <Printer size={14} className="hidden sm:block" />
-                <span className="hidden sm:inline">Imprimer</span>
-              </button>
-              <button className="flex flex-col items-center gap-0.5 sm:gap-1 py-2.5 sm:py-3 text-white/50 hover:text-white/80 hover:bg-white/5 transition-all border-r border-white/8 text-[9px] sm:text-[10px] font-medium">
-                <FileText size={12} className="sm:hidden" />
-                <FileText size={14} className="hidden sm:block" />
-                <span className="hidden sm:inline">Facture</span>
-              </button>
+            <div className="grid grid-cols-2 gap-0 border-t border-white/8">
+              <motion.button
+                onClick={handlePrintKitchen}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center justify-center gap-1.5 sm:gap-2 py-3 sm:py-3.5 text-white/70 hover:text-white hover:bg-white/5 transition-all border-r border-white/8 text-[11px] sm:text-xs font-semibold"
+              >
+                <Printer size={14} className="sm:hidden" />
+                <Printer size={16} className="hidden sm:block" />
+                Imprimer
+              </motion.button>
               <motion.button
                 onClick={onCheckout}
                 whileTap={{ scale: 0.97 }}
-                className="flex flex-col items-center gap-0.5 sm:gap-1 py-2.5 sm:py-3 text-white transition-all text-[9px] sm:text-[10px] font-semibold"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 py-3 sm:py-3.5 text-white transition-all text-[11px] sm:text-xs font-bold"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                <CreditCard size={12} className="sm:hidden" />
-                <CreditCard size={14} className="hidden sm:block" />
+                <CreditCard size={14} className="sm:hidden" />
+                <CreditCard size={16} className="hidden sm:block" />
                 Encaisser
               </motion.button>
             </div>
