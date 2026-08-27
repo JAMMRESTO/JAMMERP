@@ -5,6 +5,7 @@ import {
   ArrowUpRight, ArrowDownRight, RefreshCw, AlertTriangle,
   Package, ChefHat, Truck, Clock, CheckCircle2, UserCircle2,
   Building2, Globe, LayoutGrid, Wallet,
+  Calendar, ChevronLeft, ChevronRight,
   type LucideIcon
 } from 'lucide-react';
 import {
@@ -41,7 +42,7 @@ const STATUS_CFG: Record<string, { label: string; color: string; bg: string; ico
   ready:     { label: 'Prêt',           color: 'text-emerald-400', bg: 'bg-emerald-500/10', icon: CheckCircle2 },
 };
 const TYPE_LABELS: Record<string, string> = { dine_in: 'Sur place', takeaway: 'À emporter', delivery: 'Vente directe' };
-const CATEGORY_COLORS = ['#3B82F6','#10B981','#F59E0B','#EF4444','#06B6D4'];
+const CATEGORY_COLORS = ['#3B82F6','#10B981','#F59E0B','#EF4444','#06B6D4','#F97316','#14B8A6','#EAB308','#0EA5E9','#22C55E','#DC2626','#0891B2'];
 const SITE_COLORS     = ['#3B82F6','#10B981','#F59E0B','#EF4444','#06B6D4','#8B5CF6','#EC4899'];
 const DAYS = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 
@@ -268,6 +269,8 @@ export function Dashboard() {
   const [siteStats, setSiteStats]   = useState<SiteStat[]>([]);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [catDate, setCatDate]       = useState(new Date().toISOString().slice(0, 10));
+  const [catLoading, setCatLoading] = useState(false);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -285,11 +288,11 @@ export function Dashboard() {
         ? q.eq('site_id', siteIds[0])
         : q.in('site_id', siteIds);
 
-    const [todaySales, yestSales, weekSales, saleItems, orders, lowProducts, lowIngredients, salesByUser, allUsers, todayExpenses, yestExpenses] = await Promise.all([
+    const [todaySales, yestSales, weekSales, staleOrders, orders, lowProducts, lowIngredients, salesByUser, allUsers, todayExpenses, yestExpenses] = await Promise.all([
       sf(supabase.from('sales').select('total, site_id')).eq('status','paid').gte('created_at', today+'T00:00:00').lte('created_at', today+'T23:59:59'),
       sf(supabase.from('sales').select('total')).eq('status','paid').gte('created_at', yesterday+'T00:00:00').lte('created_at', yesterday+'T23:59:59'),
       sf(supabase.from('sales').select('total, created_at, site_id')).eq('status','paid').gte('created_at', weekAgo+'T00:00:00'),
-      sf(supabase.from('sale_items').select('product_name, quantity, subtotal, sale:sales!inner(created_at, status, site_id)')).eq('sale.status','paid').gte('sale.created_at', today+'T00:00:00'),
+      sf(supabase.from('orders').select('id, order_number, status, created_at')).in('status',['pending','preparing']).lt('created_at', new Date(Date.now() - 20 * 60000).toISOString()).limit(5),
       sf(supabase.from('orders').select('id, order_number, status, order_type, notes, created_at')).in('status',['pending','preparing','ready']).order('created_at',{ ascending: false }).limit(5),
       sf(supabase.from('products').select('name, stock, low_stock_threshold')).eq('track_stock',true).gt('low_stock_threshold',0).limit(20),
       sf(supabase.from('ingredients').select('name, stock, low_stock_threshold')).eq('is_active',true).gt('low_stock_threshold',0).lte('stock',0).limit(10),
@@ -355,19 +358,6 @@ export function Dashboard() {
     });
     setWeekData(DAYS.map(d => ({ day: d, ventes: wMap[d] ?? 0 })));
 
-    // ─── Category data ─────────────────────────────────────────
-    const catMap: Record<string, number> = {};
-    (saleItems.data ?? []).forEach((i: {product_name: string; subtotal: number}) => {
-      catMap[i.product_name] = (catMap[i.product_name] ?? 0) + i.subtotal;
-    });
-    const sorted = Object.entries(catMap).sort(([,a],[,b]) => b - a).slice(0, 5);
-    const catLabels = ['Burgers','Pizzas','Boissons','Desserts','Autres'];
-    setCatData(
-      sorted.length > 0
-        ? sorted.map(([name, value], i) => ({ name: catLabels[i] ?? name, value, color: CATEGORY_COLORS[i] }))
-        : catLabels.map((name, i) => ({ name, value: 10 + i * 5, color: CATEGORY_COLORS[i] }))
-    );
-
     // ─── Live orders ───────────────────────────────────────────
     setLiveOrders((orders.data ?? []).map((o: {id: string; order_number: number; status: string; order_type: string; notes: string; created_at: string}) => ({
       id: o.id, order_number: o.order_number,
@@ -380,17 +370,16 @@ export function Dashboard() {
     const newAlerts: DashAlert[] = [];
     (lowProducts.data ?? []).forEach((p: {name: string; stock: number | null; low_stock_threshold: number}) => {
       if ((p.stock ?? 0) <= p.low_stock_threshold)
-        newAlerts.push({ id: `p-${p.name}`, level: (p.stock ?? 0) <= 0 ? 'error' : 'warning', title: 'Stock faible', message: `${p.name} est presque épuisé`, time: '5 min' });
+        newAlerts.push({ id: `p-${p.name}`, level: (p.stock ?? 0) <= 0 ? 'error' : 'warning', title: 'Stock faible', message: `${p.name} est presque épuisé`, time: 'Maintenant' });
     });
     (lowIngredients.data ?? []).forEach((i: {name: string}) => {
-      newAlerts.push({ id: `i-${i.name}`, level: 'error', title: 'Ingrédient manquant', message: `${i.name} en rupture de stock`, time: '15 min' });
+      newAlerts.push({ id: `i-${i.name}`, level: 'error', title: 'Ingrédient manquant', message: `${i.name} en rupture de stock`, time: 'Maintenant' });
     });
-    if (newAlerts.length === 0) {
-      newAlerts.push({ id: 'demo1', level: 'warning', title: 'Stock faible', message: 'La sauce barbecue est presque épuisée', time: '5 min' });
-      newAlerts.push({ id: 'demo2', level: 'error',   title: 'Ingrédient manquant', message: 'Fromage cheddar en rupture de stock', time: '15 min' });
-      newAlerts.push({ id: 'demo3', level: 'info',    title: 'Paiement livreur', message: '3 paiements en attente', time: '30 min' });
-    }
-    setAlerts(newAlerts.slice(0, 4));
+    (staleOrders.data ?? []).forEach((o: {id: string; order_number: number; created_at: string}) => {
+      const mins = Math.floor((Date.now() - new Date(o.created_at).getTime()) / 60000);
+      newAlerts.push({ id: `o-${o.id}`, level: 'warning', title: 'Commande en attente', message: `Commande #${o.order_number} en attente depuis ${mins} min`, time: `${mins} min` });
+    });
+    setAlerts(newAlerts.slice(0, 8));
 
     // ─── Revenue by cashier ────────────────────────────────────
     const userMap: Record<string, {revenue: number; count: number}> = {};
@@ -416,6 +405,46 @@ export function Dashboard() {
   }, [sym, isTenantOwnerView, isMultiSite, sites, currentSite]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadCategoryData = useCallback(async (dateStr: string) => {
+    setCatLoading(true);
+    const querySitesCat: Site[] = isTenantOwnerView && isMultiSite ? sites : [currentSite!].filter(Boolean);
+    const catSiteIds = querySitesCat.map(s => s.id);
+    const catsf = (q: ReturnType<typeof supabase.from>) =>
+      catSiteIds.length === 1 ? q.eq('site_id', catSiteIds[0]) : q.in('site_id', catSiteIds);
+
+    const { data: catSaleItems } = await catsf(
+      supabase.from('sale_items')
+        .select('subtotal, product:products!left(category:categories!left(name)), sale:sales!inner(created_at, status, site_id)')
+        .eq('sale.status', 'paid')
+        .gte('sale.created_at', dateStr + 'T00:00:00')
+        .lte('sale.created_at', dateStr + 'T23:59:59')
+    );
+
+    const catMap: Record<string, number> = {};
+    (catSaleItems ?? []).forEach((item: { subtotal: number; product: { category: { name: string } | null } | null }) => {
+      const catName = item.product?.category?.name ?? 'Non classé';
+      catMap[catName] = (catMap[catName] ?? 0) + item.subtotal;
+    });
+    const sortedCats = Object.entries(catMap).sort(([,a],[,b]) => b - a);
+    setCatData(sortedCats.map(([name, value], i) => ({ name, value, color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] })));
+    setCatLoading(false);
+  }, [isTenantOwnerView, isMultiSite, sites, currentSite]);
+
+  useEffect(() => { loadCategoryData(catDate); }, [loadCategoryData, catDate]);
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const shiftCatDate = (delta: number) => {
+    const d = new Date(catDate + 'T00:00:00');
+    d.setDate(d.getDate() + delta);
+    setCatDate(d.toISOString().slice(0, 10));
+  };
+
+  const formatCatDate = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+  };
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -574,34 +603,74 @@ export function Dashboard() {
                 transition={{ delay: 0.35 }}
                 className="xl:col-span-2 glass-card rounded-2xl p-5 border border-white/8"
               >
-                <h3 className="text-white font-semibold text-sm mb-1">Répartition par catégories</h3>
-                <p className="text-white/30 text-xs mb-4">Part du chiffre d'affaires</p>
-                <div className="flex items-center gap-3">
-                  <div className="relative flex-shrink-0">
-                    <ResponsiveContainer width={130} height={130}>
-                      <PieChart>
-                        <Pie data={catData} dataKey="value" innerRadius={38} outerRadius={58} paddingAngle={3}>
-                          {catData.map((_, i) => <Cell key={i} fill={catData[i].color} />)}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <p className="text-white font-black text-xs">{Math.round(totalCatValue / 1000)} K</p>
-                      <p className="text-white/30 text-[9px]">Total</p>
-                    </div>
-                  </div>
-                  <div className="flex-1 space-y-1.5">
-                    {catData.map((c, i) => (
-                      <div key={i} className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
-                          <span className="text-white/60 text-[11px]">{c.name}</span>
-                        </div>
-                        <span className="text-white/40 text-[10px]">{totalCatValue > 0 ? Math.round(c.value / totalCatValue * 100) : 0}%</span>
-                      </div>
-                    ))}
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-white font-semibold text-sm">Répartition par catégories</h3>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => shiftCatDate(-1)}
+                      className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-white/50 hover:text-white transition-all"
+                    >
+                      <ChevronLeft size={12} />
+                    </button>
+                    <button
+                      onClick={() => setCatDate(todayStr)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-all ${catDate === todayStr ? 'bg-white/10 text-white' : 'bg-white/5 text-white/50 hover:text-white/80'}`}
+                    >
+                      Aujourd'hui
+                    </button>
+                    <button
+                      onClick={() => shiftCatDate(1)}
+                      className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-white/50 hover:text-white transition-all"
+                    >
+                      <ChevronRight size={12} />
+                    </button>
+                    <input
+                      type="date"
+                      value={catDate}
+                      onChange={(e) => e.target.value && setCatDate(e.target.value)}
+                      className="w-7 h-6 rounded-lg bg-white/5 border border-white/8 text-[10px] text-white/50 hover:text-white cursor-pointer transition-all [color-scheme:dark]"
+                    />
                   </div>
                 </div>
+                <p className="text-white/30 text-xs mb-4">{formatCatDate(catDate)}</p>
+
+                {catLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <RefreshCw size={20} className="text-white/20 animate-spin" />
+                  </div>
+                ) : catData.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10">
+                    <Package size={28} className="text-white/15 mb-2" />
+                    <p className="text-white/30 text-sm">Aucune vente pour cette journée</p>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <div className="relative flex-shrink-0">
+                      <ResponsiveContainer width={130} height={130}>
+                        <PieChart>
+                          <Pie data={catData} dataKey="value" innerRadius={38} outerRadius={58} paddingAngle={3}>
+                            {catData.map((_, i) => <Cell key={i} fill={catData[i].color} />)}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <p className="text-white font-black text-xs">{Math.round(totalCatValue / 1000)} K</p>
+                        <p className="text-white/30 text-[9px]">Total</p>
+                      </div>
+                    </div>
+                    <div className="flex-1 space-y-1.5 max-h-[130px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                      {catData.map((c, i) => (
+                        <div key={i} className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
+                            <span className="text-white/60 text-[11px] truncate">{c.name}</span>
+                          </div>
+                          <span className="text-white/40 text-[10px] flex-shrink-0 ml-2">{totalCatValue > 0 ? Math.round(c.value / totalCatValue * 100) : 0}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             </div>
 
@@ -722,7 +791,12 @@ export function Dashboard() {
                       <span className="text-white/20 text-xs">{alerts.length}</span>
                     </div>
                     <div className="divide-y divide-white/5">
-                      {alerts.map((alert, i) => {
+                      {alerts.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-8">
+                          <CheckCircle2 size={28} className="text-emerald-400/30 mb-2" />
+                          <p className="text-white/30 text-sm">Tout va bien — aucune alerte</p>
+                        </div>
+                      ) : alerts.map((alert, i) => {
                         const colors = { warning: { bg: 'bg-amber-500/10', text: 'text-amber-400' }, error: { bg: 'bg-red-500/10', text: 'text-red-400' }, info: { bg: 'bg-blue-500/10', text: 'text-blue-400' } };
                         const c = colors[alert.level];
                         return (
