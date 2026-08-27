@@ -32,7 +32,7 @@ const saleTypeLabels: Record<string, string> = {
 
 interface PaymentModalProps {
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (result: { sale: import('../../types/database').Sale; items: import('../../types/database').SaleItem[]; payments: { method: import('../../types/database').PaymentMethod; amount: number; reference?: string }[] }) => void;
   onDeferred: () => void;
 }
 
@@ -187,7 +187,7 @@ export function PaymentModal({ onClose, onSuccess, onDeferred }: PaymentModalPro
     const result = await completeSale(paymentsToSubmit);
     setLoading(false);
     if (result) {
-      onSuccess();
+      onSuccess({ sale: result.sale, items: result.items, payments: paymentsToSubmit });
     }
   }
 

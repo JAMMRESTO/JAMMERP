@@ -400,6 +400,7 @@ export interface RestaurantSettings {
     alerts: boolean;
   };
   receipt_footer: string;
+  auto_print_receipt: boolean;
   address: string;
   phone: string;
   siret: string;

@@ -320,6 +320,7 @@ export function SettingsPage() {
     primary_color: settings.primary_color,
     accent_color: settings.accent_color,
     receipt_footer: settings.receipt_footer,
+    auto_print_receipt: settings.auto_print_receipt ?? false,
     active_modules: { ...settings.active_modules },
     dashboard_widgets: { ...settings.dashboard_widgets },
   });
@@ -340,6 +341,7 @@ export function SettingsPage() {
       primary_color: settings.primary_color,
       accent_color: settings.accent_color,
       receipt_footer: settings.receipt_footer,
+      auto_print_receipt: settings.auto_print_receipt ?? false,
       active_modules: { ...settings.active_modules },
       dashboard_widgets: { ...settings.dashboard_widgets },
     });
@@ -361,6 +363,7 @@ export function SettingsPage() {
       updateSetting('primary_color', form.primary_color),
       updateSetting('accent_color', form.accent_color),
       updateSetting('receipt_footer', form.receipt_footer),
+      updateSetting('auto_print_receipt', form.auto_print_receipt),
       updateSetting('active_modules', form.active_modules),
       updateSetting('dashboard_widgets', form.dashboard_widgets),
     ]);
@@ -557,6 +560,24 @@ export function SettingsPage() {
                   rows={2}
                   placeholder="Message affiché en bas du ticket..."
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm resize-none placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+                />
+              </div>
+              <div
+                className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${form.auto_print_receipt ? '' : 'border-white/8 bg-white/3'}`}
+                style={form.auto_print_receipt ? {
+                  borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
+                } : undefined}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm">Impression automatique</p>
+                  <p className="text-white/30 text-xs mt-0.5">
+                    Imprime le ticket dès la confirmation du paiement, sans afficher l'aperçu.
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.auto_print_receipt}
+                  onChange={v => setForm(f => ({ ...f, auto_print_receipt: v }))}
                 />
               </div>
             </div>

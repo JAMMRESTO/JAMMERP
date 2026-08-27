@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, LogOut, Power, CreditCard, Receipt } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
+import { buildSaleReceiptHtml, printViaPopup } from '../lib/printUtils';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
 import { useTenant } from '../context/TenantContext';
@@ -29,8 +30,9 @@ function POSInner() {
   const {
     itemCount, clearCart, saleType, setSaleType,
     tableNumber, setTableNumber,
-    selectedCustomer, setSelectedCustomer,
+    selectedCustomer, setSelectedCustomer, customerName,
     isPendingResume, total: usePOSTotal,
+    subtotal, taxAmount, discountAmount,
   } = usePOS();
   const { settings } = useSettings();
   const { currentUser, lockSession, logout } = useAuth();
@@ -146,7 +148,33 @@ function POSInner() {
     return list;
   }, [products, selectedCategoryId, search]);
 
-  function handlePaymentSuccess() { setShowPayment(false); setShowReceipt(true); }
+  function handlePaymentSuccess(result: { sale: { sale_number: string; created_at: string }; items: { quantity: number; product_name: string; unit_price: number; subtotal: number; variant_label?: string | null }[]; payments: { method: string; amount: number }[] }) {
+    setShowPayment(false);
+    if (settings.auto_print_receipt) {
+      const html = buildSaleReceiptHtml(
+        {
+          saleNumber: result.sale.sale_number,
+          createdAt: result.sale.created_at,
+          saleType,
+          tableNumber,
+          cashierName: currentUser?.name ?? null,
+          customerName: selectedCustomer ? selectedCustomer.name : customerName,
+          items: result.items,
+          payments: result.payments,
+          subtotal,
+          taxAmount,
+          discountAmount,
+          total: usePOSTotal,
+        },
+        settings
+      );
+      printViaPopup(html);
+      clearCart();
+      setShowCartMobile(false);
+      return;
+    }
+    setShowReceipt(true);
+  }
   function handleNewSale() { setShowReceipt(false); clearCart(); setShowCartMobile(false); }
   function handleDeferred() {
     setShowPayment(false);

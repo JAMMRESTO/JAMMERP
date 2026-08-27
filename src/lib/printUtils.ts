@@ -189,3 +189,133 @@ export function buildA4Header(settings: {
     <hr class="sep">
   `;
 }
+
+const saleTypeReceiptLabels: Record<string, string> = {
+  dine_in: 'Sur place',
+  takeaway: 'Commandes client',
+  delivery: 'Vente directe',
+};
+
+const paymentMethodReceiptLabels: Record<string, string> = {
+  cash: 'Espèces',
+  wave: 'Wave',
+  orange_money: 'Orange Money',
+  card: 'Carte bancaire',
+};
+
+export interface SaleReceiptData {
+  saleNumber: string;
+  createdAt: string;
+  saleType: string;
+  tableNumber?: string | number | null;
+  cashierName?: string | null;
+  customerName?: string | null;
+  items: {
+    quantity: number;
+    product_name: string;
+    unit_price: number;
+    subtotal: number;
+    variant_label?: string | null;
+  }[];
+  payments: { method: string; amount: number }[];
+  subtotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+}
+
+export interface SaleReceiptSettings {
+  restaurant_name: string;
+  legal_form?: string;
+  capital?: string;
+  address?: string;
+  phone?: string;
+  vat_number?: string;
+  siret?: string;
+  tax_rate: number;
+  currency_symbol: string;
+  receipt_footer?: string;
+}
+
+/** Build a full thermal sale receipt HTML document that auto-prints on load */
+export function buildSaleReceiptHtml(
+  data: SaleReceiptData,
+  settings: SaleReceiptSettings
+): string {
+  const sym = settings.currency_symbol;
+  const fmt = (n: number) => fmtAmt(n, sym);
+
+  const dateObj = new Date(data.createdAt);
+  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const row = (left: string, right: string, large = false) =>
+    `<div class="row${large ? ' total-row' : ''}"><span class="lbl">${esc(left)}</span><span class="val">${esc(right)}</span></div>`;
+
+  const headerHtml = buildThermalHeader(settings);
+
+  const metaHtml = [
+    row(`Ticket N° : ${data.saleNumber}`, ''),
+    row(`Date : ${dateStr}`, `Heure : ${timeStr}`),
+    ...(data.tableNumber
+      ? [row(`Table : ${data.tableNumber}`, `Serveur : ${data.cashierName ?? 'N/A'}`)]
+      : [row('Serveur :', data.cashierName ?? 'N/A')]),
+    ...(data.customerName ? [row('Client :', data.customerName)] : []),
+    ...(data.saleType !== 'dine_in'
+      ? [row('Mode :', saleTypeReceiptLabels[data.saleType] ?? data.saleType)]
+      : []),
+    `<hr class="sep">`,
+  ].join('\n');
+
+  const colHeaderHtml =
+    `<div class="col-header"><span class="qty">Qté</span><span class="desc">Désignation</span><span class="pu">P.U.</span><span class="ttl">Total</span></div>`;
+
+  const itemsHtml = data.items.map(item => {
+    const variant = item.variant_label
+      ? `<div style="font-size:10px;padding-left:24px;">[${esc(item.variant_label)}]</div>`
+      : '';
+    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}`;
+  }).join('');
+
+  const totalsHtml = [
+    `<hr class="sep">`,
+    ...(data.discountAmount > 0 ? [row('Sous-total', fmt(data.subtotal))] : []),
+    ...(data.discountAmount > 0 ? [row('Remise', `- ${fmt(data.discountAmount)}`)] : []),
+    row(`TVA (${settings.tax_rate}%)`, fmt(data.taxAmount)),
+    `<hr class="sep-solid">`,
+    row('TOTAL TTC', fmt(data.total), true),
+    `<hr class="sep-solid">`,
+  ].join('\n');
+
+  const paymentsHtml = [
+    `<div class="section-title">MODE DE RÈGLEMENT</div>`,
+    ...data.payments.map(p => row(`${paymentMethodReceiptLabels[p.method] ?? p.method} :`, fmt(p.amount))),
+    `<hr class="sep">`,
+  ].join('\n');
+
+  const footerHtml = [
+    `<div class="footer">${esc(settings.receipt_footer || 'Merci de votre visite !')}</div>`,
+    `<div class="footer">À bientôt.</div>`,
+    `<hr class="sep">`,
+  ].join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Ticket #${esc(data.saleNumber)}</title>
+  <style>${THERMAL_CSS}</style>
+</head>
+<body>
+  ${headerHtml}
+  ${metaHtml}
+  ${colHeaderHtml}
+  ${itemsHtml}
+  ${totalsHtml}
+  ${paymentsHtml}
+  ${footerHtml}
+  <script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
+</body>
+</html>`;
+}

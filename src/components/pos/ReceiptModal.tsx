@@ -8,7 +8,7 @@ import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
 import { AdminPinModal } from './AdminPinModal';
-import { esc, fmtNum, fmtAmt, THERMAL_CSS, buildThermalHeader, printViaPopup } from '../../lib/printUtils';
+import { printViaPopup, buildSaleReceiptHtml } from '../../lib/printUtils';
 import type { UserWithRole } from '../../types/database';
 
 const saleTypeLabels = {
@@ -37,84 +37,29 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
   const SaleTypeIcon = saleTypeLabels[saleType].icon;
 
   function handlePrint() {
-    const fmt = (n: number) => fmtAmt(n, sym);
-
-    const paymentMethodLabels: Record<string, string> = {
-      cash: 'Espèces', wave: 'Wave', orange_money: 'Orange Money', card: 'Carte bancaire',
-    };
-
-    const dateObj = new Date(sale.created_at);
-    const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-    const row = (left: string, right: string, large = false) =>
-      `<div class="row${large ? ' total-row' : ''}"><span class="lbl">${esc(left)}</span><span class="val">${esc(right)}</span></div>`;
-
-    const headerHtml = buildThermalHeader(settings);
-
-    const metaHtml = [
-      row(`Ticket N° : ${sale.sale_number}`, ''),
-      row(`Date : ${dateStr}`, `Heure : ${timeStr}`),
-      ...(tableNumber
-        ? [row(`Table : ${tableNumber}`, `Serveur : ${currentUser?.name ?? 'N/A'}`)]
-        : [row('Serveur :', currentUser?.name ?? 'N/A')]),
-      ...(selectedCustomer
-        ? [row('Client :', selectedCustomer.name)]
-        : customerName ? [row('Client :', customerName)] : []),
-      ...(saleType !== 'dine_in' ? [row('Mode :', saleTypeLabels[saleType].label)] : []),
-      `<hr class="sep">`,
-    ].join('\n');
-
-    const colHeaderHtml = `<div class="col-header"><span class="qty">Qté</span><span class="desc">Désignation</span><span class="pu">P.U.</span><span class="ttl">Total</span></div>`;
-
-    const itemsHtml = currentSaleItems.map(item => {
-      const variant = item.variant_label
-        ? `<div style="font-size:10px;padding-left:24px;">[${esc(item.variant_label)}]</div>`
-        : '';
-      return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}`;
-    }).join('');
-
-    const totalsHtml = [
-      `<hr class="sep">`,
-      ...(discountAmount > 0 ? [row('Sous-total', fmt(subtotal))] : []),
-      ...(discountAmount > 0 ? [row('Remise', `- ${fmt(discountAmount)}`)] : []),
-      row(`TVA (${settings.tax_rate}%)`, fmt(taxAmount)),
-      `<hr class="sep-solid">`,
-      row('TOTAL TTC', fmt(total), true),
-      `<hr class="sep-solid">`,
-    ].join('\n');
-
-    const paymentsHtml = [
-      `<div class="section-title">MODE DE RÈGLEMENT</div>`,
-      ...lastPayments.map(p => row(`${paymentMethodLabels[p.method] ?? p.method} :`, fmt(p.amount))),
-      `<hr class="sep">`,
-    ].join('\n');
-
-    const footerHtml = [
-      `<div class="footer">${esc(settings.receipt_footer || 'Merci de votre visite !')}</div>`,
-      `<div class="footer">À bientôt.</div>`,
-      `<hr class="sep">`,
-    ].join('\n');
-
-    const html = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="color-scheme" content="only light">
-  <title>Ticket #${sale.sale_number}</title>
-  <style>${THERMAL_CSS}</style>
-</head>
-<body>
-  ${headerHtml}
-  ${metaHtml}
-  ${colHeaderHtml}
-  ${itemsHtml}
-  ${totalsHtml}
-  ${paymentsHtml}
-  ${footerHtml}
-  <script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
-</body>
-</html>`;
+    const html = buildSaleReceiptHtml(
+      {
+        saleNumber: sale.sale_number,
+        createdAt: sale.created_at,
+        saleType,
+        tableNumber,
+        cashierName: currentUser?.name ?? null,
+        customerName: selectedCustomer ? selectedCustomer.name : customerName,
+        items: currentSaleItems.map(i => ({
+          quantity: i.quantity,
+          product_name: i.product_name,
+          unit_price: i.unit_price,
+          subtotal: i.subtotal,
+          variant_label: i.variant_label,
+        })),
+        payments: lastPayments.map(p => ({ method: p.method, amount: p.amount })),
+        subtotal,
+        taxAmount,
+        discountAmount,
+        total,
+      },
+      settings
+    );
 
     printViaPopup(html);
     onClose();
