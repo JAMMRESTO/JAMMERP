@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    @apply antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.animate-slide-up {
+  animation: slide-up 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@media print {
+  body * { visibility: hidden; }
+  #ticket-print, #ticket-print *, #recu-print, #recu-print * { visibility: visible; }
+  #ticket-print, #recu-print {
+    position: fixed; top: 0; left: 0;
+    width: 80mm; padding: 6mm;
+    font-size: 10pt; font-family: monospace;
+    overflow: hidden; word-wrap: break-word; overflow-wrap: break-word;
+  }
+  #ticket-print.format-55mm, #recu-print.format-55mm { width: 55mm; padding: 4mm; font-size: 8pt; }
+  @page { margin: 12mm 10mm; size: A4 portrait; }
+}
