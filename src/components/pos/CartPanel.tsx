@@ -8,6 +8,8 @@ import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
 import { buildKitchenTicketHtml, printViaIframe } from '../../lib/printUtils';
+import { printKitchenTicket, type EscposKitchenData } from '../../lib/escpos';
+import { usePrinter } from '../../context/PrinterContext';
 import type { CartItem, SaleType } from '../../types/database';
 
 function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
@@ -142,29 +144,31 @@ export function CartPanel({ onCheckout }: CartPanelProps) {
   } = usePOS();
   const { settings } = useSettings();
   const { currentUser } = useAuth();
+  const { connected: printerConnected } = usePrinter();
   const sym = settings.currency_symbol;
 
   function handlePrintKitchen() {
     if (cart.length === 0) return;
-    const html = buildKitchenTicketHtml(
-      {
-        createdAt: new Date().toISOString(),
-        saleType,
-        tableNumber,
-        cashierName: currentUser?.name ?? null,
-        customerName: selectedCustomer?.name || customerName,
-        orderNotes,
-        items: cart.map(item => ({
-          quantity: item.quantity,
-          product_name: item.product.name,
-          variant_label: item.variant_label,
-          sauces: item.sauces,
-          flavors: item.flavors,
-          kitchen_note: item.kitchen_note,
-        })),
-      },
-      settings
-    );
+    const kitchenData: EscposKitchenData = {
+      createdAt: new Date().toISOString(),
+      saleType,
+      tableNumber,
+      customerName: selectedCustomer?.name || customerName,
+      orderNotes,
+      items: cart.map(item => ({
+        quantity: item.quantity,
+        product_name: item.product.name,
+        variant_label: item.variant_label,
+        sauces: item.sauces,
+        flavors: item.flavors,
+        kitchen_note: item.kitchen_note,
+      })),
+    };
+    if (printerConnected) {
+      printKitchenTicket(kitchenData);
+      return;
+    }
+    const html = buildKitchenTicketHtml(kitchenData, settings);
     printViaIframe(html);
   }
 

@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, LogOut, Power, CreditCard, Receipt } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
 import { buildSaleReceiptHtml, buildCombinedKitchenAndReceiptHtml, printViaIframe } from '../lib/printUtils';
+import { printCombined, printReceipt, printKitchenTicket, isPrinterConnected, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
+import { usePrinter } from '../context/PrinterContext';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
 import { useTenant } from '../context/TenantContext';
@@ -38,6 +40,7 @@ function POSInner() {
   const { settings } = useSettings();
   const { currentUser, lockSession, logout } = useAuth();
   const { currentSite, authUser, isSiteManager } = useTenant();
+  const { connected: printerConnected } = usePrinter();
   const siteId = currentSite?.id ?? null;
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -152,7 +155,7 @@ function POSInner() {
   function handlePaymentSuccess(result: { sale: { sale_number: string; created_at: string }; items: { quantity: number; product_name: string; unit_price: number; subtotal: number; variant_label?: string | null; sauces?: { name: string; price_supplement?: number }[] | null }[]; payments: { method: string; amount: number }[] }) {
     setShowPayment(false);
     if (settings.auto_print_receipt) {
-      const receiptData = {
+      const receiptData: EscposReceiptData = {
         saleNumber: result.sale.sale_number,
         createdAt: result.sale.created_at,
         saleType,
@@ -166,28 +169,55 @@ function POSInner() {
         discountAmount,
         total: usePOSTotal,
       };
-      const html = settings.print_kitchen_with_receipt
-        ? buildCombinedKitchenAndReceiptHtml(
-            {
-              createdAt: result.sale.created_at,
-              saleType,
-              tableNumber,
-              cashierName: currentUser?.name ?? null,
-              customerName: selectedCustomer ? selectedCustomer.name : customerName,
-              orderNotes,
-              items: cart.map(item => ({
-                quantity: item.quantity,
-                product_name: item.product.name,
-                variant_label: item.variant_label,
-                sauces: item.sauces,
-                kitchen_note: item.kitchen_note,
-              })),
-            },
-            receiptData,
-            settings
-          )
-        : buildSaleReceiptHtml(receiptData, settings);
-      printViaIframe(html);
+      const kitchenData: EscposKitchenData = {
+        createdAt: result.sale.created_at,
+        saleType,
+        tableNumber,
+        customerName: selectedCustomer ? selectedCustomer.name : customerName,
+        orderNotes,
+        items: cart.map(item => ({
+          quantity: item.quantity,
+          product_name: item.product.name,
+          variant_label: item.variant_label,
+          sauces: item.sauces,
+          flavors: item.flavors,
+          kitchen_note: item.kitchen_note,
+        })),
+      };
+
+      if (printerConnected) {
+        // Silent USB printing — no dialog
+        if (settings.print_kitchen_with_receipt) {
+          printCombined(kitchenData, receiptData, settings);
+        } else {
+          printReceipt(receiptData, settings);
+        }
+      } else {
+        // Fallback: iframe print
+        const html = settings.print_kitchen_with_receipt
+          ? buildCombinedKitchenAndReceiptHtml(
+              {
+                createdAt: result.sale.created_at,
+                saleType,
+                tableNumber,
+                cashierName: currentUser?.name ?? null,
+                customerName: selectedCustomer ? selectedCustomer.name : customerName,
+                orderNotes,
+                items: cart.map(item => ({
+                  quantity: item.quantity,
+                  product_name: item.product.name,
+                  variant_label: item.variant_label,
+                  sauces: item.sauces,
+                  flavors: item.flavors,
+                  kitchen_note: item.kitchen_note,
+                })),
+              },
+              receiptData,
+              settings
+            )
+          : buildSaleReceiptHtml(receiptData, settings);
+        printViaIframe(html);
+      }
       clearCart();
       setShowCartMobile(false);
       return;

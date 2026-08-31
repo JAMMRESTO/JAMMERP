@@ -9,6 +9,8 @@ import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
 import { AdminPinModal } from './AdminPinModal';
 import { printViaIframe, buildSaleReceiptHtml, buildCombinedKitchenAndReceiptHtml } from '../../lib/printUtils';
+import { printCombined, printReceipt, type EscposKitchenData, type EscposReceiptData } from '../../lib/escpos';
+import { usePrinter } from '../../context/PrinterContext';
 import type { UserWithRole } from '../../types/database';
 
 const saleTypeLabels = {
@@ -26,6 +28,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
   const { currentSale, currentSaleItems, total, subtotal, taxAmount, discountAmount, saleType, tableNumber, customerName, selectedCustomer, lastPayments, cancelSale, orderNotes } = usePOS();
   const { settings } = useSettings();
   const { currentUser } = useAuth();
+  const { connected: printerConnected } = usePrinter();
   const receiptRef = useRef<HTMLDivElement>(null);
   const sym = settings.currency_symbol;
   const [showCancelPin, setShowCancelPin] = useState(false);
@@ -37,7 +40,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
   const SaleTypeIcon = saleTypeLabels[saleType].icon;
 
   function handlePrint() {
-    const receiptData = {
+    const receiptData: EscposReceiptData = {
       saleNumber: sale.sale_number,
       createdAt: sale.created_at,
       saleType,
@@ -59,30 +62,53 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
       discountAmount,
       total,
     };
-    const html = settings.print_kitchen_with_receipt
-      ? buildCombinedKitchenAndReceiptHtml(
-          {
-            createdAt: sale.created_at,
-            saleType,
-            tableNumber,
-            cashierName: currentUser?.name ?? null,
-            customerName: selectedCustomer ? selectedCustomer.name : customerName,
-            orderNotes,
-            items: currentSaleItems.map(i => ({
-              quantity: i.quantity,
-              product_name: i.product_name,
-              variant_label: i.variant_label,
-              sauces: i.sauces ?? [],
-              flavors: i.flavors ?? [],
-              kitchen_note: i.kitchen_note ?? '',
-            })),
-          },
-          receiptData,
-          settings
-        )
-      : buildSaleReceiptHtml(receiptData, settings);
+    const kitchenData: EscposKitchenData = {
+      createdAt: sale.created_at,
+      saleType,
+      tableNumber,
+      customerName: selectedCustomer ? selectedCustomer.name : customerName,
+      orderNotes,
+      items: currentSaleItems.map(i => ({
+        quantity: i.quantity,
+        product_name: i.product_name,
+        variant_label: i.variant_label,
+        sauces: i.sauces ?? [],
+        flavors: i.flavors ?? [],
+        kitchen_note: i.kitchen_note ?? '',
+      })),
+    };
 
-    printViaIframe(html);
+    if (printerConnected) {
+      if (settings.print_kitchen_with_receipt) {
+        printCombined(kitchenData, receiptData, settings);
+      } else {
+        printReceipt(receiptData, settings);
+      }
+    } else {
+      const html = settings.print_kitchen_with_receipt
+        ? buildCombinedKitchenAndReceiptHtml(
+            {
+              createdAt: sale.created_at,
+              saleType,
+              tableNumber,
+              cashierName: currentUser?.name ?? null,
+              customerName: selectedCustomer ? selectedCustomer.name : customerName,
+              orderNotes,
+              items: currentSaleItems.map(i => ({
+                quantity: i.quantity,
+                product_name: i.product_name,
+                variant_label: i.variant_label,
+                sauces: i.sauces ?? [],
+                flavors: i.flavors ?? [],
+                kitchen_note: i.kitchen_note ?? '',
+              })),
+            },
+            receiptData,
+            settings
+          )
+        : buildSaleReceiptHtml(receiptData, settings);
+      printViaIframe(html);
+    }
     onClose();
   }
 
@@ -100,7 +126,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 safe-pt safe-pb safe-pl safe-pr"
       >
         <motion.div
           initial={{ opacity: 0, scale: 0.9, y: 30 }}

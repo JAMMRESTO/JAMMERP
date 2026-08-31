@@ -18,6 +18,7 @@ import { useState, useEffect } from 'react';
 import { usePWA } from './lib/usePWA';
 import { useSettings } from './context/SettingsContext';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
+import { PrinterProvider } from './context/PrinterContext';
 
 function isSubscriptionExpired(tenant: { subscription_expires_at: string | null }): boolean {
   if (!tenant.subscription_expires_at) return false;
@@ -117,9 +118,11 @@ function LoadingScreen() {
 function ProvidersTree() {
   return (
     <SettingsProvider>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
+      <PrinterProvider>
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      </PrinterProvider>
     </SettingsProvider>
   );
 }

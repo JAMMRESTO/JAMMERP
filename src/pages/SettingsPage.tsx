@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Store, DollarSign, Palette, Puzzle, Receipt, Save, Check, Users, Phone, MapPin, FileText, Building2, LayoutDashboard, Upload, X, ShoppingCart, Copy, Lock, Eye, EyeOff, Shield, type LucideIcon
+  Store, DollarSign, Palette, Puzzle, Receipt, Save, Check, Users, Phone, MapPin, FileText, Building2, LayoutDashboard, Upload, X, ShoppingCart, Copy, Lock, Eye, EyeOff, Shield, Printer, Usb, type LucideIcon
 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
+import { usePrinter } from '../context/PrinterContext';
 import { useToast } from '../components/ui/Toast';
 import { UserManagement } from '../components/auth/UserManagement';
 import { SiteManagersPanel } from '../components/auth/SiteManagersPanel';
@@ -285,6 +286,85 @@ function OwnerPinCard() {
           {saving ? '...' : (ownerPin ? 'Modifier' : 'Definir')}
         </button>
       </form>
+    </div>
+  );
+}
+
+function PrinterConnectionCard() {
+  const { supported, connected, connect, disconnect } = usePrinter();
+  const toast = useToast();
+  const [connecting, setConnecting] = useState(false);
+
+  async function handleConnect() {
+    setConnecting(true);
+    const ok = await connect();
+    setConnecting(false);
+    if (ok) toast('success', 'Imprimante connectée');
+    else toast('error', 'Connexion échouée — vérifiez que l\'imprimante est branchée en USB');
+  }
+
+  async function handleDisconnect() {
+    await disconnect();
+    toast('success', 'Imprimante déconnectée');
+  }
+
+  return (
+    <div className="glass-card rounded-2xl p-6 border border-white/8 space-y-4">
+      <h3 className="text-white font-semibold text-base flex items-center gap-2">
+        <Printer size={16} className="text-cyan-400" /> Imprimante thermique USB
+      </h3>
+      {!supported ? (
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/8 border border-amber-500/20">
+          <Usb size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-amber-300 text-sm font-medium">Navigateur non compatible</p>
+            <p className="text-amber-400/60 text-xs mt-1">
+              WebUSB est requis pour l'impression directe. Utilisez Google Chrome ou Edge sur ordinateur avec l'imprimante branchée en USB.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${connected ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-white/5 border border-white/10'}`}>
+                <Usb size={18} className={connected ? 'text-emerald-400' : 'text-white/30'} />
+              </div>
+              <div>
+                <p className="text-white text-sm font-medium">
+                  {connected ? 'Imprimante connectée' : 'Aucune imprimante'}
+                </p>
+                <p className="text-white/30 text-xs mt-0.5">
+                  {connected
+                    ? 'L\'impression se fait automatiquement, sans fenêtre de dialogue.'
+                    : 'Connectez votre imprimante Epson USB pour l\'impression silencieuse.'}
+                </p>
+              </div>
+            </div>
+            {connected ? (
+              <button
+                onClick={handleDisconnect}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-sm font-medium transition-all flex-shrink-0"
+              >
+                <X size={14} /> Déconnecter
+              </button>
+            ) : (
+              <button
+                onClick={handleConnect}
+                disabled={connecting}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium transition-all flex-shrink-0"
+              >
+                {connecting ? (
+                  <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                ) : (
+                  <Usb size={14} />
+                )}
+                {connecting ? 'Connexion...' : 'Connecter'}
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -607,8 +687,10 @@ export function SettingsPage() {
                   onChange={v => setForm(f => ({ ...f, print_kitchen_with_receipt: v }))}
                 />
               </div>
+
+              {/* Printer connection */}
+              <PrinterConnectionCard />
               <div
-                className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${form.sauces_enabled ? '' : 'border-white/8 bg-white/3'}`}
                 style={form.sauces_enabled ? {
                   borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
                   backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
@@ -676,7 +758,7 @@ export function SettingsPage() {
                 ))}
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <InputField
                 label="Symbole de devise"
                 value={form.currency_symbol}

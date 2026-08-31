@@ -302,7 +302,8 @@ export function MobileSidebar({ activePage, onNavigate, open, onClose }: Sidebar
             animate={{ x: 0 }}
             exit={{ x: -280 }}
             transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-            className="fixed left-0 top-0 h-full w-[168px] bg-gray-900 border-r border-white/8 z-50 flex flex-col"
+            className="fixed left-0 top-0 h-full w-[168px] bg-gray-900 border-r border-white/8 z-50 flex flex-col safe-pt"
+            style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
           >
             <div className="flex items-center gap-2.5 px-4 py-4 border-b border-white/8">
               <div

@@ -373,24 +373,19 @@ const saleTypeKitchenLabels: Record<string, string> = {
 /** Build only the inner body of a kitchen preparation ticket. */
 export function buildKitchenTicketBody(
   data: KitchenTicketData,
-  settings: KitchenTicketSettings
+  _settings: KitchenTicketSettings
 ): string {
   const dateObj = new Date(data.createdAt);
-  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
   const row = (left: string, right: string) =>
     `<div class="row"><span class="lbl">${esc(left)}</span><span class="val">${esc(right)}</span></div>`;
 
-  const headerHtml = buildThermalHeader(settings);
-
   const metaHtml = [
-    `<div class="banner">TICKET CUISINE</div>`,
-    row(`Date : ${dateStr}`, `Heure : ${timeStr}`),
-    row('Caissier :', data.cashierName ?? 'N/A'),
-    row('Type :', saleTypeKitchenLabels[data.saleType] ?? data.saleType),
-    ...(data.saleType === 'dine_in' && data.tableNumber ? [row('Table :', String(data.tableNumber))] : []),
+    `<div class="banner">CUISINE</div>`,
+    ...(data.saleType === 'dine_in' && data.tableNumber ? [row('Sur place', `n${data.tableNumber}`)] : []),
     ...(data.saleType !== 'dine_in' && data.customerName ? [row('Client :', data.customerName)] : []),
+    row('Heure :', timeStr),
     `<hr class="sep-solid">`,
   ].join('\n');
 
@@ -421,13 +416,7 @@ export function buildKitchenTicketBody(
       ].join('\n')
     : '';
 
-  const footerHtml = [
-    `<hr class="sep-solid">`,
-    `<div class="footer">Ticket de préparation cuisine</div>`,
-    `<div class="footer">${esc(dateStr)} · ${esc(timeStr)}</div>`,
-  ].join('\n');
-
-  return `${headerHtml}\n${metaHtml}\n${itemsHtml}\n${notesHtml}\n${footerHtml}`;
+  return `${metaHtml}\n${itemsHtml}\n${notesHtml}`;
 }
 
 function wrapThermalDoc(title: string, body: string): string {

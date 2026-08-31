@@ -111,12 +111,12 @@ function PeriodFilter({ preset, range, monthValue, availableYears, onPresetChang
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/8">
+      <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/8 overflow-x-auto mobile-scroll-x flex-1 min-w-0" style={{ scrollbarWidth: 'none' }}>
         {presets.map(p => (
           <button
             key={p.id}
             onClick={() => onPresetChange(p.id)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${preset === p.id ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/70'}`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap flex-shrink-0 ${preset === p.id ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/70'}`}
           >
             {p.label}
           </button>
@@ -807,8 +807,8 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
         </div>
       )}
 
-      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
+      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-x-auto mobile-scroll-x">
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3 min-w-[480px]">
           <div className="w-8 text-white/30 text-xs font-medium">Rang</div>
           <div className="flex-1 text-white/30 text-xs font-medium">Produit</div>
           <div className="w-24 text-white/30 text-xs font-medium text-right">Qté vendue</div>
@@ -825,7 +825,7 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
         ) : items.map((item, idx) => {
           const pct = totalRevenue > 0 ? (item.total_revenue / totalRevenue) * 100 : 0;
           return (
-            <div key={item.product_name} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+            <div key={item.product_name} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors min-w-[480px]">
               <div className="w-8 text-white/30 text-xs font-bold">{idx + 1}</div>
               <div className="flex-1 min-w-0">
                 <p className="text-white text-sm font-medium truncate">{item.product_name}</p>
@@ -927,8 +927,8 @@ function DriversReport({ range, sym, settings }: { range: PeriodRange; sym: stri
         </button>
       </div>
 
-      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
+      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-x-auto mobile-scroll-x">
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3 min-w-[400px]">
           <div className="flex-1 text-white/30 text-xs font-medium">Livreur</div>
           <div className="w-20 text-white/30 text-xs font-medium text-right">Livraisons</div>
           <div className="hidden sm:block w-28 text-white/30 text-xs font-medium text-right">CA</div>
@@ -943,7 +943,7 @@ function DriversReport({ range, sym, settings }: { range: PeriodRange; sym: stri
             <p className="text-white/30 text-sm">Aucune livraison sur cette période</p>
           </div>
         ) : data.map(d => (
-          <div key={d.name} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+          <div key={d.name} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors min-w-[400px]">
             <div className="flex-1 min-w-0">
               <p className="text-white font-medium text-sm">{d.name}</p>
             </div>
@@ -1120,8 +1120,8 @@ function ProductionReport({ range, sym, settings }: { range: PeriodRange; sym: s
         </button>
       </div>
 
-      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
+      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-x-auto mobile-scroll-x">
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3 min-w-[480px]">
           <div className="flex-1 text-white/30 text-xs font-medium">Produit</div>
           <div className="w-20 text-white/30 text-xs font-medium text-right">Produit</div>
           <div className="hidden sm:block w-16 text-white/30 text-xs font-medium text-right">Pertes</div>
@@ -1137,7 +1137,7 @@ function ProductionReport({ range, sym, settings }: { range: PeriodRange; sym: s
             <p className="text-white/30 text-sm">Aucune production sur cette période</p>
           </div>
         ) : prods.map((p, i) => (
-          <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+          <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors min-w-[480px]">
             <div className="flex-1 min-w-0">
               <p className="text-white text-sm font-medium truncate">{p.product_name}</p>
             </div>

@@ -184,7 +184,7 @@ export function Header({ activePage, onMenuToggle }: HeaderProps) {
   }, []);
 
   return (
-    <header className="h-14 sm:h-16 flex items-center gap-2 sm:gap-4 px-3 sm:px-4 lg:px-6 bg-gray-900/60 backdrop-blur-xl border-b border-white/8 flex-shrink-0 relative z-30">
+    <header className="h-14 sm:h-16 flex items-center gap-2 sm:gap-4 px-3 sm:px-4 lg:px-6 bg-gray-900/60 backdrop-blur-xl border-b border-white/8 flex-shrink-0 relative z-30 safe-pt" style={{ paddingLeft: 'max(env(safe-area-inset-left, 0px), 0.75rem)', paddingRight: 'max(env(safe-area-inset-right, 0px), 0.75rem)' }}>
       <button
         onClick={onMenuToggle}
         className="md:hidden w-9 h-9 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-all"

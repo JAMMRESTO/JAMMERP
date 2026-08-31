@@ -64,7 +64,7 @@ export function FlavorManagerModal({ open, onClose }: FlavorManagerModalProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+        className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 safe-pt safe-pb safe-pl safe-pr"
         onClick={onClose}
       >
         <motion.div
@@ -203,7 +203,7 @@ function FlavorFormModal({ flavor, siteId, onClose, onSaved }: FlavorFormModalPr
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 safe-pt safe-pb safe-pl safe-pr"
       onClick={onClose}
     >
       <motion.form
