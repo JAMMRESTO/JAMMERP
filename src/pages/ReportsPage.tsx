@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { esc, fmtAmt, A4_CSS, buildA4Header } from '../lib/printUtils';
+import { esc, fmtAmt, A4_CSS, A4_CSS_LANDSCAPE, buildA4Header, printViaIframe } from '../lib/printUtils';
 import {
   BarChart3, TrendingUp, Package, Truck, FlaskConical,
   ShoppingBag, Download, Printer, FileText, CalendarDays,
   ArrowUpRight, ArrowDownRight, DollarSign, Users,
-  RefreshCw, ChevronDown, Filter, Check
+  RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Filter, Check
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -19,31 +19,43 @@ import { useSettings } from '../context/SettingsContext';
 // Types
 // ─────────────────────────────────────────────────────────
 type ReportTab = 'sales' | 'products' | 'drivers' | 'stock' | 'production';
-type PeriodPreset = 'today' | 'week' | 'month' | 'custom';
+type PeriodPreset = 'today' | 'week' | 'month' | 'specific-month' | 'custom';
 
 interface PeriodRange {
   from: string;
   to: string;
 }
 
+const MONTH_LABELS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const fmtDate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+function getMonthRange(year: number, month: number): PeriodRange {
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  return { from: fmtDate(first), to: fmtDate(last) };
+}
+
 function getPresetRange(preset: PeriodPreset): PeriodRange {
   const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
   if (preset === 'today') {
-    const t = fmt(now);
+    const t = fmtDate(now);
     return { from: t, to: t };
   }
   if (preset === 'week') {
     const mon = new Date(now);
     mon.setDate(now.getDate() - now.getDay() + 1);
-    return { from: fmt(mon), to: fmt(now) };
+    return { from: fmtDate(mon), to: fmtDate(now) };
   }
   if (preset === 'month') {
-    return { from: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`, to: fmt(now) };
+    return { from: `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`, to: fmtDate(now) };
   }
-  return { from: fmt(now), to: fmt(now) };
+  if (preset === 'specific-month') {
+    return getMonthRange(now.getFullYear(), now.getMonth());
+  }
+  return { from: fmtDate(now), to: fmtDate(now) };
 }
 
 // ─────────────────────────────────────────────────────────
@@ -69,19 +81,33 @@ function ChartTooltip({ active, payload, label, sym }: { active?: boolean; paylo
 interface PeriodFilterProps {
   preset: PeriodPreset;
   range: PeriodRange;
+  monthValue: { year: number; month: number };
+  availableYears: number[];
   onPresetChange: (p: PeriodPreset) => void;
   onRangeChange: (r: PeriodRange) => void;
+  onMonthChange: (v: { year: number; month: number }) => void;
   onRefresh: () => void;
   loading: boolean;
 }
 
-function PeriodFilter({ preset, range, onPresetChange, onRangeChange, onRefresh, loading }: PeriodFilterProps) {
+function PeriodFilter({ preset, range, monthValue, availableYears, onPresetChange, onRangeChange, onMonthChange, onRefresh, loading }: PeriodFilterProps) {
   const presets: { id: PeriodPreset; label: string }[] = [
     { id: 'today', label: "Aujourd'hui" },
     { id: 'week', label: 'Cette semaine' },
     { id: 'month', label: 'Ce mois' },
+    { id: 'specific-month', label: 'Mois précis' },
     { id: 'custom', label: 'Personnalisé' },
   ];
+
+  const now = new Date();
+  const isCurrentMonth = monthValue.year === now.getFullYear() && monthValue.month === now.getMonth();
+  const canGoNext = !(monthValue.year >= now.getFullYear() && monthValue.month >= now.getMonth());
+
+  const shiftMonth = (delta: number) => {
+    const d = new Date(monthValue.year, monthValue.month + delta, 1);
+    if (d.getTime() > new Date(now.getFullYear(), now.getMonth(), 1).getTime()) return;
+    onMonthChange({ year: d.getFullYear(), month: d.getMonth() });
+  };
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -96,6 +122,56 @@ function PeriodFilter({ preset, range, onPresetChange, onRangeChange, onRefresh,
           </button>
         ))}
       </div>
+
+      {preset === 'specific-month' && (
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => shiftMonth(-1)}
+            className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-white/60 hover:text-white transition-all"
+            title="Mois précédent"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <select
+            value={monthValue.month}
+            onChange={e => onMonthChange({ ...monthValue, month: parseInt(e.target.value, 10) })}
+            className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500/50 [color-scheme:dark]"
+          >
+            {MONTH_LABELS.map((m, i) => {
+              const disabled = monthValue.year === now.getFullYear() && i > now.getMonth();
+              return <option key={i} value={i} disabled={disabled}>{m}</option>;
+            })}
+          </select>
+          <select
+            value={monthValue.year}
+            onChange={e => {
+              const y = parseInt(e.target.value, 10);
+              const m = (y === now.getFullYear() && monthValue.month > now.getMonth()) ? now.getMonth() : monthValue.month;
+              onMonthChange({ year: y, month: m });
+            }}
+            className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500/50 [color-scheme:dark]"
+          >
+            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <button
+            onClick={() => shiftMonth(1)}
+            disabled={!canGoNext}
+            className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-white/60 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Mois suivant"
+          >
+            <ChevronRight size={14} />
+          </button>
+          {!isCurrentMonth && (
+            <button
+              onClick={() => onMonthChange({ year: now.getFullYear(), month: now.getMonth() })}
+              className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 text-white/60 hover:text-white text-[11px] font-medium transition-all"
+            >
+              Ce mois-ci
+            </button>
+          )}
+        </div>
+      )}
+
       {preset === 'custom' && (
         <div className="flex items-center gap-2">
           <input
@@ -170,13 +246,24 @@ function buildReportHtml(
   settings: PrintReportSettings,
   headers: string[],
   rows: (string | number)[][],
+  options: { orientation?: 'portrait' | 'landscape'; colWidths?: string[]; alignRight?: number[] } = {},
 ): string {
-  const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const orientation = options.orientation ?? 'portrait';
+  const css = orientation === 'landscape' ? A4_CSS_LANDSCAPE : A4_CSS;
+  const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const docHeader = buildA4Header(settings);
-  const thHtml = headers.map(h => `<th>${esc(h)}</th>`).join('');
-  const trHtml = rows.map(r =>
-    `<tr>${r.map(c => `<td>${esc(String(c))}</td>`).join('')}</tr>`
+  const rightSet = new Set(options.alignRight ?? []);
+  const colgroupHtml = options.colWidths
+    ? `<colgroup>${options.colWidths.map(w => `<col style="width:${w};">`).join('')}</colgroup>`
+    : '';
+  const thHtml = headers.map((h, i) =>
+    `<th${rightSet.has(i) ? ' class="text-right"' : ''}>${esc(h)}</th>`
   ).join('');
+  const trHtml = rows.map(r =>
+    `<tr>${r.map((c, i) => `<td${rightSet.has(i) ? ' class="text-right"' : ''}>${esc(String(c))}</td>`).join('')}</tr>`
+  ).join('');
+
+  const footer = `<div class="doc-footer"><span>${esc(settings.restaurant_name)}</span><span>${esc(title)}</span></div>`;
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -184,7 +271,7 @@ function buildReportHtml(
   <meta charset="utf-8">
   <meta name="color-scheme" content="only light">
   <title>${esc(title)}</title>
-  <style>${A4_CSS}</style>
+  <style>${css}</style>
 </head>
 <body>
   ${docHeader}
@@ -192,19 +279,16 @@ function buildReportHtml(
   <p class="subtitle">Édité le ${esc(dateStr)}</p>
   <hr class="sep">
   ${rows.length > 0
-    ? `<table><thead><tr>${thHtml}</tr></thead><tbody>${trHtml}</tbody></table>`
+    ? `<table>${colgroupHtml}<thead><tr>${thHtml}</tr></thead><tbody>${trHtml}</tbody></table>`
     : `<p style="color:#333;font-size:10pt;margin-top:12px;">Aucune donnée à afficher.</p>`
   }
-  <script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
+  ${footer}
 </body>
 </html>`;
 }
 
 function printReportHtml(html: string) {
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, '_blank', 'width=960,height=750,toolbar=0,menubar=0,location=0,scrollbars=1');
-  if (win) { win.onunload = () => URL.revokeObjectURL(url); } else { URL.revokeObjectURL(url); }
+  printViaIframe(html);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -229,6 +313,9 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
   const siteId = currentSite?.id ?? null;
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [hideEmptyDays, setHideEmptyDays] = useState(false);
+  const [includeDetail, setIncludeDetail] = useState(true);
   const printRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -241,30 +328,56 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
       .lte('created_at', range.to + 'T23:59:59')
       .eq('status', 'paid')
       .order('created_at', { ascending: false })
-      .limit(200);
+      .limit(5000);
     setSales((data ?? []) as SaleRow[]);
+    setSelectedDay(null);
     setLoading(false);
   }, [range, siteId]);
 
   useEffect(() => { load(); }, [load]);
 
   const totalRevenue = sales.reduce((s, r) => s + r.total, 0);
+  const totalSubtotal = sales.reduce((s, r) => s + r.subtotal, 0);
   const totalDiscount = sales.reduce((s, r) => s + r.discount_amount, 0);
   const totalTax = sales.reduce((s, r) => s + r.tax_amount, 0);
   const avgTicket = sales.length > 0 ? totalRevenue / sales.length : 0;
 
-  // Build daily chart data
-  const dailyMap: Record<string, number> = {};
+  // ── Daily totals ─────────────────────────────────────────────
+  interface DayTotal {
+    date: string;
+    count: number;
+    subtotal: number;
+    discount: number;
+    tax: number;
+    total: number;
+  }
+  const dailyByKey: Record<string, DayTotal> = {};
   sales.forEach(s => {
-    const day = s.created_at.slice(0, 10);
-    dailyMap[day] = (dailyMap[day] ?? 0) + s.total;
+    const d = s.created_at.slice(0, 10);
+    if (!dailyByKey[d]) dailyByKey[d] = { date: d, count: 0, subtotal: 0, discount: 0, tax: 0, total: 0 };
+    dailyByKey[d].count++;
+    dailyByKey[d].subtotal += s.subtotal;
+    dailyByKey[d].discount += s.discount_amount;
+    dailyByKey[d].tax += s.tax_amount;
+    dailyByKey[d].total += s.total;
   });
-  const chartData = Object.entries(dailyMap)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, total]) => ({
-      date: new Date(date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),
-      total,
-    }));
+
+  // Fill missing days across the range
+  const allDays: DayTotal[] = [];
+  const from = new Date(range.from + 'T00:00:00');
+  const to = new Date(range.to + 'T00:00:00');
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  for (let d = new Date(from); d.getTime() <= to.getTime() && d.getTime() <= today.getTime(); d.setDate(d.getDate() + 1)) {
+    const key = fmtDate(d);
+    allDays.push(dailyByKey[key] ?? { date: key, count: 0, subtotal: 0, discount: 0, tax: 0, total: 0 });
+  }
+  const dailyRows = hideEmptyDays ? allDays.filter(d => d.count > 0) : allDays;
+
+  const chartData = allDays.map(d => ({
+    date: new Date(d.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),
+    total: d.total,
+  }));
 
   // By type
   const byType = { dine_in: 0, takeaway: 0, delivery: 0 };
@@ -277,11 +390,149 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
     { name: 'Livraison', value: byType.delivery, color: '#F59E0B' },
   ].filter(p => p.value > 0);
 
+  const displayedSales = selectedDay ? sales.filter(s => s.created_at.slice(0, 10) === selectedDay) : sales;
+
+  const rangeLabel = range.from === range.to
+    ? new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    : `Du ${new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} au ${new Date(range.to).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+
+  const formatDayLabel = (iso: string) => {
+    const d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+
   const handleExport = () => exportToCSV(
     ['#', 'Type', 'Client', 'Table', 'Sous-total', 'Remise', 'TVA', 'Total', 'Date'],
     sales.map(s => [s.sale_number, s.sale_type, s.customer_name, s.table_number, s.subtotal, s.discount_amount, s.tax_amount, s.total, new Date(s.created_at).toLocaleString('fr-FR')]),
     'rapport_ventes'
   );
+
+  const handlePrint = () => {
+    const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const docHeader = buildA4Header(settings);
+    const fmtAmount = (n: number) => `${Math.round(n).toLocaleString('fr-FR')}\u00a0${sym}`;
+
+    const kpisHtml = `
+      <div class="stat-block">
+        <div class="stat"><span class="stat-val">${fmtAmount(totalRevenue)}</span><span class="stat-lbl">Chiffre d'affaires</span></div>
+        <div class="stat"><span class="stat-val">${sales.length}</span><span class="stat-lbl">Tickets</span></div>
+        <div class="stat"><span class="stat-val">${fmtAmount(avgTicket)}</span><span class="stat-lbl">Ticket moyen</span></div>
+        <div class="stat"><span class="stat-val">${fmtAmount(totalDiscount)}</span><span class="stat-lbl">Remises</span></div>
+        <div class="stat"><span class="stat-val">${fmtAmount(totalTax)}</span><span class="stat-lbl">TVA collectée</span></div>
+      </div>
+    `;
+
+    const dailyRowsHtml = dailyRows.map(d => `
+      <tr>
+        <td>${esc(formatDayLabel(d.date))}</td>
+        <td class="text-right">${d.count}</td>
+        <td class="text-right">${fmtAmount(d.subtotal)}</td>
+        <td class="text-right">${fmtAmount(d.discount)}</td>
+        <td class="text-right">${fmtAmount(d.tax)}</td>
+        <td class="text-right">${fmtAmount(d.total)}</td>
+      </tr>
+    `).join('');
+    const dailyTable = `
+      <h3 style="margin-top:14px;">Totaux par jour</h3>
+      <table>
+        <colgroup>
+          <col style="width:28%;">
+          <col style="width:12%;">
+          <col style="width:15%;">
+          <col style="width:15%;">
+          <col style="width:15%;">
+          <col style="width:15%;">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Jour</th>
+            <th class="text-right">Tickets</th>
+            <th class="text-right">Sous-total</th>
+            <th class="text-right">Remises</th>
+            <th class="text-right">TVA</th>
+            <th class="text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody>${dailyRowsHtml || `<tr><td colspan="6" style="text-align:center;color:#555;">Aucune journée à afficher.</td></tr>`}</tbody>
+        <tfoot>
+          <tr class="total-row">
+            <td>Total du mois</td>
+            <td class="text-right">${sales.length}</td>
+            <td class="text-right">${fmtAmount(totalSubtotal)}</td>
+            <td class="text-right">${fmtAmount(totalDiscount)}</td>
+            <td class="text-right">${fmtAmount(totalTax)}</td>
+            <td class="text-right">${fmtAmount(totalRevenue)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    const typeLabel = (t: string) => t === 'dine_in' ? 'Sur place' : t === 'takeaway' ? 'À emporter' : 'Livraison';
+    const detailRowsHtml = sales.slice().reverse().map(s => `
+      <tr>
+        <td>${esc(String(s.sale_number))}</td>
+        <td>${esc(typeLabel(s.sale_type))}</td>
+        <td>${esc(s.customer_name || '—')}</td>
+        <td>${esc(s.table_number || '—')}</td>
+        <td class="text-right">${fmtAmount(s.subtotal)}</td>
+        <td class="text-right">${fmtAmount(s.discount_amount)}</td>
+        <td class="text-right">${fmtAmount(s.tax_amount)}</td>
+        <td class="text-right">${fmtAmount(s.total)}</td>
+        <td>${esc(new Date(s.created_at).toLocaleString('fr-FR'))}</td>
+      </tr>
+    `).join('');
+    const detailBlock = includeDetail && sales.length > 0 ? `
+      <h3 style="margin-top:14px;">Détail des tickets</h3>
+      <table>
+        <colgroup>
+          <col style="width:6%;">
+          <col style="width:10%;">
+          <col style="width:16%;">
+          <col style="width:7%;">
+          <col style="width:11%;">
+          <col style="width:10%;">
+          <col style="width:10%;">
+          <col style="width:12%;">
+          <col style="width:18%;">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>#</th><th>Type</th><th>Client</th><th>Table</th>
+            <th class="text-right">Sous-total</th>
+            <th class="text-right">Remise</th>
+            <th class="text-right">TVA</th>
+            <th class="text-right">Total</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>${detailRowsHtml}</tbody>
+      </table>
+    ` : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Rapport Ventes</title>
+  <style>${A4_CSS_LANDSCAPE}</style>
+</head>
+<body>
+  ${docHeader}
+  <h2>Rapport des ventes</h2>
+  <p class="subtitle">${esc(rangeLabel)} — édité le ${esc(dateStr)}</p>
+  <hr class="sep">
+  ${kpisHtml}
+  ${dailyTable}
+  ${detailBlock}
+  <div class="doc-footer">
+    <span>${esc(settings.restaurant_name)}</span>
+    <span>Rapport des ventes — ${esc(rangeLabel)}</span>
+  </div>
+</body>
+</html>`;
+    printViaIframe(html);
+  };
 
   return (
     <div className="space-y-4">
@@ -294,14 +545,29 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
         </div>
       </div>
 
-      <div className="flex gap-2 justify-end">
+      <div className="flex flex-wrap gap-2 justify-end items-center">
+        <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={hideEmptyDays}
+            onChange={e => setHideEmptyDays(e.target.checked)}
+            className="w-3.5 h-3.5 accent-blue-500"
+          />
+          Masquer les jours sans vente
+        </label>
+        <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={includeDetail}
+            onChange={e => setIncludeDetail(e.target.checked)}
+            className="w-3.5 h-3.5 accent-blue-500"
+          />
+          Inclure le détail à l'impression
+        </label>
         <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
           <Download size={12} /> Exporter CSV
         </button>
-        <button onClick={() => printReportHtml(buildReportHtml('Rapport Ventes', settings,
-            ['#', 'Type', 'Client', 'Table', 'Sous-total', 'Remise', 'TVA', 'Total', 'Date'],
-            sales.map(s => [s.sale_number, s.sale_type === 'dine_in' ? 'Sur place' : s.sale_type === 'takeaway' ? 'À emporter' : 'Livraison', s.customer_name || '—', s.table_number || '—', `${s.subtotal.toLocaleString('fr-FR')} ${sym}`, `${s.discount_amount.toLocaleString('fr-FR')} ${sym}`, `${s.tax_amount.toLocaleString('fr-FR')} ${sym}`, `${s.total.toLocaleString('fr-FR')} ${sym}`, new Date(s.created_at).toLocaleString('fr-FR')])
-          ))} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
+        <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-xs transition-all">
           <Printer size={12} /> Imprimer
         </button>
       </div>
@@ -343,10 +609,80 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
         </div>
       )}
 
+      {/* Daily totals table */}
+      <div className="glass-card rounded-2xl border border-white/8 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+          <div>
+            <h3 className="text-white font-semibold text-sm">Totaux par jour</h3>
+            <p className="text-white/30 text-[11px] mt-0.5">Cliquez sur une ligne pour filtrer les tickets ci-dessous</p>
+          </div>
+          {selectedDay && (
+            <button
+              onClick={() => setSelectedDay(null)}
+              className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 hover:text-white text-[11px] font-medium transition-all"
+            >
+              Retirer le filtre
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-12 px-3 sm:px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+          <div className="col-span-4">Jour</div>
+          <div className="col-span-2 text-right">Tickets</div>
+          <div className="col-span-2 text-right hidden sm:block">Remises</div>
+          <div className="col-span-2 text-right hidden sm:block">TVA</div>
+          <div className="col-span-2 sm:col-span-2 col-start-11 text-right">Total</div>
+        </div>
+        <div className="divide-y divide-white/5 max-h-72 overflow-y-auto scrollbar-thin">
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-10 animate-pulse bg-white/2" />)
+          ) : dailyRows.length === 0 ? (
+            <div className="py-8 text-center">
+              <p className="text-white/30 text-sm">Aucune journée à afficher</p>
+            </div>
+          ) : dailyRows.map(d => {
+            const active = selectedDay === d.date;
+            return (
+              <button
+                key={d.date}
+                onClick={() => setSelectedDay(active ? null : d.date)}
+                className={`w-full grid grid-cols-12 items-center px-3 sm:px-4 py-2.5 text-left transition-colors ${active ? 'bg-blue-500/15' : 'hover:bg-white/3'}`}
+              >
+                <div className="col-span-4">
+                  <p className="text-white text-xs font-medium">{formatDayLabel(d.date)}</p>
+                </div>
+                <div className="col-span-2 text-right">
+                  <span className={`text-xs tabular-nums ${d.count > 0 ? 'text-white/70' : 'text-white/25'}`}>{d.count}</span>
+                </div>
+                <div className="col-span-2 text-right hidden sm:block">
+                  <span className={`text-xs tabular-nums ${d.discount > 0 ? 'text-amber-400/80' : 'text-white/25'}`}>{d.discount > 0 ? d.discount.toLocaleString('fr-FR') : '—'}</span>
+                </div>
+                <div className="col-span-2 text-right hidden sm:block">
+                  <span className={`text-xs tabular-nums ${d.tax > 0 ? 'text-white/60' : 'text-white/25'}`}>{d.tax > 0 ? d.tax.toLocaleString('fr-FR') : '—'}</span>
+                </div>
+                <div className="col-span-2 sm:col-span-2 col-start-11 text-right">
+                  <span className={`font-semibold text-xs sm:text-sm tabular-nums ${d.total > 0 ? 'text-white' : 'text-white/30'}`}>
+                    {d.total > 0 ? d.total.toLocaleString('fr-FR') : '—'}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div className="grid grid-cols-12 items-center px-3 sm:px-4 py-2.5 border-t border-white/8 bg-white/3">
+          <div className="col-span-4 text-white/60 text-xs font-semibold">Total de la période</div>
+          <div className="col-span-2 text-right text-white/50 text-xs tabular-nums">{sales.length}</div>
+          <div className="col-span-2 text-right hidden sm:block text-amber-400/80 text-xs tabular-nums">{totalDiscount > 0 ? totalDiscount.toLocaleString('fr-FR') : '—'}</div>
+          <div className="col-span-2 text-right hidden sm:block text-white/50 text-xs tabular-nums">{totalTax > 0 ? totalTax.toLocaleString('fr-FR') : '—'}</div>
+          <div className="col-span-2 sm:col-span-2 col-start-11 text-right text-white font-black text-sm tabular-nums">{totalRevenue.toLocaleString('fr-FR')}</div>
+        </div>
+      </div>
+
       <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
         <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-b border-white/8 bg-white/3">
           <div className="w-8 sm:w-10 text-white/30 text-xs font-medium">#</div>
-          <div className="flex-1 text-white/30 text-xs font-medium">Client / Table</div>
+          <div className="flex-1 text-white/30 text-xs font-medium">
+            {selectedDay ? `Tickets du ${formatDayLabel(selectedDay)}` : 'Client / Table'}
+          </div>
           <div className="hidden sm:block w-24 text-white/30 text-xs font-medium">Type</div>
           <div className="hidden md:block w-24 text-white/30 text-xs font-medium text-right">Remise</div>
           <div className="w-20 sm:w-28 text-white/30 text-xs font-medium text-right">Total</div>
@@ -354,12 +690,12 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
         </div>
         {loading ? (
           Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
-        ) : sales.length === 0 ? (
+        ) : displayedSales.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <DollarSign size={28} className="text-white/15 mb-2" />
-            <p className="text-white/30 text-sm">Aucune vente sur cette période</p>
+            <p className="text-white/30 text-sm">{selectedDay ? 'Aucune vente ce jour' : 'Aucune vente sur cette période'}</p>
           </div>
-        ) : sales.map(s => (
+        ) : displayedSales.map(s => (
           <div key={s.id} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
             <div className="w-8 sm:w-10 text-white/40 text-[10px] sm:text-xs font-mono">#{s.sale_number}</div>
             <div className="flex-1 min-w-0">
@@ -840,16 +1176,71 @@ const tabs: { id: ReportTab; label: string; icon: React.ComponentType<{ size?: n
 
 export function ReportsPage() {
   const { settings } = useSettings();
+  const { currentSite } = useTenant();
   const sym = settings.currency_symbol;
 
+  const nowRef = new Date();
   const [tab, setTab] = useState<ReportTab>('sales');
-  const [preset, setPreset] = useState<PeriodPreset>('month');
-  const [range, setRange] = useState<PeriodRange>(getPresetRange('month'));
+  const [preset, setPreset] = useState<PeriodPreset>(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem('reports.preset') : null;
+    return (stored === 'today' || stored === 'week' || stored === 'month' || stored === 'specific-month' || stored === 'custom') ? stored : 'month';
+  });
+  const [monthValue, setMonthValue] = useState<{ year: number; month: number }>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? window.localStorage.getItem('reports.month') : null;
+      if (stored) {
+        const parsed = JSON.parse(stored) as { year: number; month: number };
+        if (Number.isInteger(parsed.year) && Number.isInteger(parsed.month)) return parsed;
+      }
+    } catch { /* ignore */ }
+    return { year: nowRef.getFullYear(), month: nowRef.getMonth() };
+  });
+  const [range, setRange] = useState<PeriodRange>(() => {
+    if (preset === 'specific-month') return getMonthRange(monthValue.year, monthValue.month);
+    return getPresetRange(preset);
+  });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [availableYears, setAvailableYears] = useState<number[]>([nowRef.getFullYear()]);
+
+  // Load available years from earliest sale
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!currentSite?.id) return;
+      const { data } = await supabase
+        .from('sales')
+        .select('created_at')
+        .eq('site_id', currentSite.id)
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (cancelled) return;
+      const firstYear = data && data.length > 0 ? new Date((data[0] as { created_at: string }).created_at).getFullYear() : nowRef.getFullYear();
+      const years: number[] = [];
+      for (let y = firstYear; y <= nowRef.getFullYear(); y++) years.push(y);
+      setAvailableYears(years);
+    })();
+    return () => { cancelled = true; };
+  }, [currentSite?.id]);
+
+  // Persist selection
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('reports.preset', preset);
+    window.localStorage.setItem('reports.month', JSON.stringify(monthValue));
+  }, [preset, monthValue]);
 
   function handlePresetChange(p: PeriodPreset) {
     setPreset(p);
-    if (p !== 'custom') setRange(getPresetRange(p));
+    if (p === 'specific-month') {
+      setRange(getMonthRange(monthValue.year, monthValue.month));
+    } else if (p !== 'custom') {
+      setRange(getPresetRange(p));
+    }
+  }
+
+  function handleMonthChange(v: { year: number; month: number }) {
+    setMonthValue(v);
+    if (preset === 'specific-month') setRange(getMonthRange(v.year, v.month));
   }
 
   return (
@@ -860,8 +1251,11 @@ export function ReportsPage() {
         <PeriodFilter
           preset={preset}
           range={range}
+          monthValue={monthValue}
+          availableYears={availableYears}
           onPresetChange={handlePresetChange}
           onRangeChange={setRange}
+          onMonthChange={handleMonthChange}
           onRefresh={() => setRefreshKey(k => k + 1)}
           loading={false}
         />

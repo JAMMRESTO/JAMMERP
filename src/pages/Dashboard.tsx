@@ -4,7 +4,7 @@ import {
   TrendingUp, ShoppingBag, DollarSign, Receipt, Users,
   ArrowUpRight, ArrowDownRight, RefreshCw, AlertTriangle,
   Package, ChefHat, Truck, Clock, CheckCircle2, UserCircle2,
-  Building2, Globe, LayoutGrid, Wallet,
+  Building2, Globe, LayoutGrid, Wallet, Printer,
   Calendar, ChevronLeft, ChevronRight,
   type LucideIcon
 } from 'lucide-react';
@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
 import { useTenant } from '../context/TenantContext';
+import { esc, A4_CSS_LANDSCAPE, buildA4Header, printViaIframe } from '../lib/printUtils';
 import type { Site } from '../types/database';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -457,6 +458,119 @@ export function Dashboard() {
   const totalCatValue = catData.reduce((s, c) => s + c.value, 0);
   const showMultiView = isTenantOwnerView && isMultiSite;
 
+  const handlePrintReport = () => {
+    const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const scope = showMultiView ? `Vue consolidée — ${sites.length} sites` : `Site : ${currentSite?.name ?? ''}`;
+    const header = buildA4Header({
+      restaurant_name: settings.restaurant_name || tenant?.name || 'Rapport',
+      address: settings.address,
+      phone: settings.phone,
+    });
+    const kpisHtml = kpis.map(k => `
+      <div class="stat">
+        <span class="stat-val">${esc(k.value)}</span>
+        <span class="stat-lbl">${esc(k.label)}</span>
+      </div>
+    `).join('');
+    const cashierRowsHtml = userRevenues.length > 0
+      ? userRevenues.map(u => `
+        <tr>
+          <td>${esc(u.name)}</td>
+          <td class="text-right">${u.count}</td>
+          <td class="text-right">${u.revenue.toLocaleString('fr-FR')} ${esc(sym)}</td>
+        </tr>
+      `).join('')
+      : '';
+    const totalCashiers = userRevenues.reduce((s, u) => s + u.revenue, 0);
+    const totalTickets = userRevenues.reduce((s, u) => s + u.count, 0);
+    const cashierBlockHtml = userRevenues.length > 0
+      ? `
+        <h3 style="margin-top:14px;">Chiffre d'affaires par caissier</h3>
+        <table>
+          <colgroup>
+            <col style="width:55%;">
+            <col style="width:15%;">
+            <col style="width:30%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Caissier</th>
+              <th class="text-right">Tickets</th>
+              <th class="text-right">CA</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${cashierRowsHtml}
+          </tbody>
+          <tfoot>
+            <tr class="total-row">
+              <td>Total du jour</td>
+              <td class="text-right">${totalTickets}</td>
+              <td class="text-right">${totalCashiers.toLocaleString('fr-FR')} ${esc(sym)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      `
+      : '';
+    const siteRowsHtml = showMultiView && siteStats.length > 0
+      ? siteStats.map(s => `
+        <tr>
+          <td>${esc(s.site.name)}</td>
+          <td class="text-right">${s.orders}</td>
+          <td class="text-right">${s.avgTicket.toLocaleString('fr-FR')} ${esc(sym)}</td>
+          <td class="text-right">${s.revenue.toLocaleString('fr-FR')} ${esc(sym)}</td>
+        </tr>
+      `).join('')
+      : '';
+    const siteBlockHtml = siteRowsHtml
+      ? `
+        <h3 style="margin-top:14px;">Répartition par site</h3>
+        <table>
+          <colgroup>
+            <col style="width:40%;">
+            <col style="width:15%;">
+            <col style="width:22%;">
+            <col style="width:23%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Site</th>
+              <th class="text-right">Commandes</th>
+              <th class="text-right">Ticket moyen</th>
+              <th class="text-right">CA</th>
+            </tr>
+          </thead>
+          <tbody>${siteRowsHtml}</tbody>
+        </table>
+      `
+      : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Rapport du jour</title>
+  <style>${A4_CSS_LANDSCAPE}</style>
+</head>
+<body>
+  ${header}
+  <h2>Rapport du tableau de bord</h2>
+  <p class="subtitle">${esc(scope)} — édité le ${esc(dateStr)}</p>
+  <hr class="sep">
+  <div class="stat-block">${kpisHtml}</div>
+  ${siteBlockHtml}
+  ${cashierBlockHtml}
+  <div class="doc-footer">
+    <span>${esc(settings.restaurant_name || tenant?.name || '')}</span>
+    <span>Rapport du jour</span>
+  </div>
+</body>
+</html>`;
+
+    printViaIframe(html);
+  };
+
   return (
     <div className="p-3 sm:p-4 lg:p-5 space-y-4 h-full overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
 
@@ -484,6 +598,14 @@ export function Dashboard() {
         </div>
         <div className="flex items-center gap-2">
           {showMultiView && <ViewToggle mode={viewMode} onChange={setViewMode} />}
+          <button
+            onClick={handlePrintReport}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-xs font-medium transition-all disabled:opacity-50"
+          >
+            <Printer size={12} />
+            <span className="hidden sm:inline">Imprimer le rapport</span>
+          </button>
           <button
             onClick={load}
             disabled={refreshing}

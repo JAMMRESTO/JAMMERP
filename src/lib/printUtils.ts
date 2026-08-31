@@ -58,12 +58,12 @@ export const THERMAL_CSS = `
   @media print { body { padding: 3px 2px 8px; } @page { margin: 3mm; size: 80mm auto; } }
 `;
 
-/** CSS for A4 report documents */
-export const A4_CSS = `
+/** Shared A4 layout rules — used by both portrait and landscape variants. */
+const A4_BODY_CSS = `
   ${BASE_PRINT_CSS}
   body {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 11pt;
+    font-size: 10.5pt;
     color: #000;
     background: #fff;
     padding: 24px 28px 32px;
@@ -74,29 +74,61 @@ export const A4_CSS = `
   .subtitle { font-size: 10pt; color: #333; margin-bottom: 16px; }
   .sep { border: none; border-top: 1px solid #000; margin: 10px 0; }
   .sep-light { border: none; border-top: 1px dashed #555; margin: 6px 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 10pt; margin-top: 8px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    margin-top: 8px;
+    table-layout: fixed;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr { page-break-inside: avoid; }
   th {
     background: #f0f0f0 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
     border: 1px solid #000;
-    padding: 6px 8px;
+    padding: 5px 6px;
     font-weight: 700;
     text-align: left;
-    font-size: 10pt;
+    font-size: 9.5pt;
+    word-break: break-word;
   }
-  td { border: 1px solid #555; padding: 5px 8px; font-size: 10pt; font-weight: 500; }
+  td {
+    border: 1px solid #555;
+    padding: 4px 6px;
+    font-size: 9.5pt;
+    font-weight: 500;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
   tr:nth-child(even) td { background: #fafafa !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .stat-block { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+  .stat-block { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
   .stat { border: 2px solid #000; padding: 8px 14px; min-width: 120px; }
-  .stat-val { font-size: 18pt; font-weight: 800; color: #000; display: block; }
+  .stat-val { font-size: 16pt; font-weight: 800; color: #000; display: block; }
   .stat-lbl { font-size: 9pt; font-weight: 600; color: #333; display: block; margin-top: 2px; }
   .text-right { text-align: right; }
   .text-center { text-align: center; }
   .bold { font-weight: 700; }
-  .amount { font-weight: 700; font-size: 11pt; }
-  .total-row td { font-weight: 700; border-top: 2px solid #000 !important; font-size: 11pt; }
+  .amount { font-weight: 700; font-size: 10pt; }
+  .total-row td { font-weight: 700; border-top: 2px solid #000 !important; font-size: 10.5pt; background: #f7f7f7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .doc-footer { margin-top: 14px; padding-top: 6px; border-top: 1px solid #000; font-size: 9pt; color: #333; display: flex; justify-content: space-between; }
+`;
+
+/** CSS for A4 portrait report documents */
+export const A4_CSS = `
+  ${A4_BODY_CSS}
   @media print { body { padding: 0; } @page { margin: 12mm 10mm; size: A4 portrait; } }
+`;
+
+/** CSS for A4 landscape report documents (wide tables) */
+export const A4_CSS_LANDSCAPE = `
+  ${A4_BODY_CSS}
+  @media print { body { padding: 0; } @page { margin: 10mm 10mm; size: A4 landscape; } }
 `;
 
 /**

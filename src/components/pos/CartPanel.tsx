@@ -7,7 +7,7 @@ import {
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
-import { esc, THERMAL_CSS, buildThermalHeader, printViaPopup } from '../../lib/printUtils';
+import { esc, THERMAL_CSS, buildThermalHeader, printViaIframe } from '../../lib/printUtils';
 import type { CartItem, SaleType } from '../../types/database';
 
 function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
@@ -203,7 +203,7 @@ export function CartPanel({ onCheckout }: CartPanelProps) {
 </body>
 </html>`;
 
-    printViaPopup(html);
+    printViaIframe(html);
   }
 
   return (

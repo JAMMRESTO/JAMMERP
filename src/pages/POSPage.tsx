@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, LogOut, Power, CreditCard, Receipt } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
-import { buildSaleReceiptHtml, printViaPopup } from '../lib/printUtils';
+import { buildSaleReceiptHtml, printViaIframe } from '../lib/printUtils';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
 import { useTenant } from '../context/TenantContext';
@@ -168,7 +168,7 @@ function POSInner() {
         },
         settings
       );
-      printViaPopup(html);
+      printViaIframe(html);
       clearCart();
       setShowCartMobile(false);
       return;

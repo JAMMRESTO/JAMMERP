@@ -8,7 +8,7 @@ import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
 import { AdminPinModal } from './AdminPinModal';
-import { printViaPopup, buildSaleReceiptHtml } from '../../lib/printUtils';
+import { printViaIframe, buildSaleReceiptHtml } from '../../lib/printUtils';
 import type { UserWithRole } from '../../types/database';
 
 const saleTypeLabels = {
@@ -61,7 +61,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
       settings
     );
 
-    printViaPopup(html);
+    printViaIframe(html);
     onClose();
   }
 

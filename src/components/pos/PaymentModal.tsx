@@ -8,7 +8,7 @@ import {
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
-import { esc, fmtNum, fmtAmt, THERMAL_CSS, buildThermalHeader, printViaPopup } from '../../lib/printUtils';
+import { esc, fmtNum, fmtAmt, THERMAL_CSS, buildThermalHeader, printViaIframe } from '../../lib/printUtils';
 import type { PaymentMethod, SaleItem, Sale } from '../../types/database';
 
 const methods: { id: PaymentMethod; label: string; icon: LucideIcon; color: string }[] = [
@@ -114,7 +114,7 @@ function printDeferredTicket(
 </body>
 </html>`;
 
-  printViaPopup(html);
+  printViaIframe(html);
 }
 
 export function PaymentModal({ onClose, onSuccess, onDeferred }: PaymentModalProps) {
