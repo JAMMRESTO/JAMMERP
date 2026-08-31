@@ -43,6 +43,11 @@ function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
               ↳ {item.sauces.map(s => s.name).join(', ')}
             </p>
           )}
+          {item.flavors && item.flavors.length > 0 && (
+            <p className="text-blue-300/80 text-[9px] sm:text-[10px] mt-0.5 truncate">
+              ↳ {item.flavors.map(f => f.name).join(', ')}
+            </p>
+          )}
         </div>
 
         {/* Qty controls */}
@@ -154,6 +159,7 @@ export function CartPanel({ onCheckout }: CartPanelProps) {
           product_name: item.product.name,
           variant_label: item.variant_label,
           sauces: item.sauces,
+          flavors: item.flavors,
           kitchen_note: item.kitchen_note,
         })),
       },

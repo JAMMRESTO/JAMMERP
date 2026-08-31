@@ -323,6 +323,7 @@ export function SettingsPage() {
     auto_print_receipt: settings.auto_print_receipt ?? false,
     print_kitchen_with_receipt: settings.print_kitchen_with_receipt ?? false,
     sauces_enabled: settings.sauces_enabled ?? false,
+    flavors_enabled: settings.flavors_enabled ?? false,
     active_modules: { ...settings.active_modules },
     dashboard_widgets: { ...settings.dashboard_widgets },
   });
@@ -346,6 +347,7 @@ export function SettingsPage() {
       auto_print_receipt: settings.auto_print_receipt ?? false,
       print_kitchen_with_receipt: settings.print_kitchen_with_receipt ?? false,
       sauces_enabled: settings.sauces_enabled ?? false,
+      flavors_enabled: settings.flavors_enabled ?? false,
       active_modules: { ...settings.active_modules },
       dashboard_widgets: { ...settings.dashboard_widgets },
     });
@@ -370,6 +372,7 @@ export function SettingsPage() {
       updateSetting('auto_print_receipt', form.auto_print_receipt),
       updateSetting('print_kitchen_with_receipt', form.print_kitchen_with_receipt),
       updateSetting('sauces_enabled', form.sauces_enabled),
+      updateSetting('flavors_enabled', form.flavors_enabled),
       updateSetting('active_modules', form.active_modules),
       updateSetting('dashboard_widgets', form.dashboard_widgets),
     ]);
@@ -620,6 +623,24 @@ export function SettingsPage() {
                 <Toggle
                   checked={form.sauces_enabled}
                   onChange={v => setForm(f => ({ ...f, sauces_enabled: v }))}
+                />
+              </div>
+              <div
+                className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${form.flavors_enabled ? '' : 'border-white/8 bg-white/3'}`}
+                style={form.flavors_enabled ? {
+                  borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
+                } : undefined}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm">Gestion des gouts</p>
+                  <p className="text-white/30 text-xs mt-0.5">
+                    Active un catalogue de gouts et permet d'exiger un choix de gout sur certains produits (visible en caisse, sur le reçu et le ticket cuisine).
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.flavors_enabled}
+                  onChange={v => setForm(f => ({ ...f, flavors_enabled: v }))}
                 />
               </div>
             </div>

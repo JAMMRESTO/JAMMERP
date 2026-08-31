@@ -4,7 +4,7 @@ import {
   Plus, Pencil, Trash2, CheckCircle2, XCircle, Eye, EyeOff,
   Shield, ShoppingCart, Package,
   Save, X, User, KeyRound, Image, ToggleLeft, ToggleRight,
-  Search, RefreshCw, Building2, ChevronDown, ChevronRight, Users, Mail, Lock,
+  Search, RefreshCw, Building2, ChevronDown, ChevronRight, Users, Mail,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../ui/Toast';
@@ -15,12 +15,6 @@ function slugify(str: string): string {
   return str.toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/g, '');
-}
-
-function generateEmail(name: string, siteSlug: string): string {
-  const part = slugify(name) || 'user';
-  const domain = slugify(siteSlug) || 'site';
-  return `${part}@${domain}.app`;
 }
 
 const ROLE_CONFIG: Record<string, {
@@ -43,9 +37,6 @@ function getInitials(name: string) {
 
 interface UserFormData {
   name: string;
-  email: string;
-  password: string;
-  cashierPassword: string;
   pin: string;
   role_id: string;
   avatar_url: string;
@@ -73,9 +64,6 @@ function UserForm({
   const toast = useToast();
   const [form, setForm] = useState<UserFormData>({
     name: user?.name ?? '',
-    email: user?.email ?? '',
-    password: '',
-    cashierPassword: '',
     pin: '',
     role_id: user?.role_id ?? (roles[0]?.id ?? ''),
     avatar_url: user?.avatar_url ?? '',
@@ -83,7 +71,6 @@ function UserForm({
     site_id: user?.site_id ?? defaultSiteId ?? (sites[0]?.id ?? ''),
   });
   const [showPin, setShowPin] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pinError, setPinError] = useState('');
 
@@ -96,9 +83,8 @@ function UserForm({
   }, [roles]);
 
   const selectedRole = roles.find(r => r.id === form.role_id);
-  const isCashier = selectedRole?.name === 'cashier';
   const selectedSite = sites.find(s => s.id === form.site_id);
-  const cashierEmail = selectedSite ? `caisse@${slugify(selectedSite.slug)}.app` : 'caisse@site.app';
+  const sharedEmail = selectedSite ? `caisse@${slugify(selectedSite.slug)}.app` : 'caisse@site.app';
 
   function validatePin(p: string) {
     if (!p) return '';
@@ -107,24 +93,12 @@ function UserForm({
   }
 
   function handleNameChange(name: string) {
-    setForm(f => {
-      const site = sites.find(s => s.id === f.site_id);
-      const role = roles.find(r => r.id === f.role_id);
-      const isAdminRole = role?.name !== 'cashier';
-      const autoEmail = !f.email || f.email === generateEmail(f.name, site?.slug ?? '');
-      return {
-        ...f,
-        name,
-        email: isAdminRole && autoEmail && site ? generateEmail(name, site.slug) : f.email,
-      };
-    });
+    setForm(f => ({ ...f, name }));
   }
 
   async function handleSave() {
     if (!form.name.trim()) { toast('error', 'Le nom est requis'); return; }
     if (!user && !form.pin) { toast('error', 'Le PIN est requis'); return; }
-    if (!user && !isCashier && !form.email.trim()) { toast('error', "L'email est requis"); return; }
-    if (!user && !isCashier && form.password.length < 6) { toast('error', 'Le mot de passe doit contenir au moins 6 caractères'); return; }
     const pinErr = form.pin ? validatePin(form.pin) : '';
     if (pinErr) { setPinError(pinErr); return; }
     if (!form.role_id) { toast('error', 'Aucun rôle disponible. Veuillez contacter le super administrateur.'); return; }
@@ -141,9 +115,6 @@ function UserForm({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           role: selectedRole?.name ?? 'cashier',
-          email: isCashier ? undefined : form.email.trim(),
-          password: isCashier ? undefined : form.password,
-          cashier_password: isCashier && form.cashierPassword.length >= 6 ? form.cashierPassword : undefined,
           name: form.name.trim(),
           pin: form.pin,
           role_id: form.role_id || null,
@@ -170,46 +141,6 @@ function UserForm({
     if (form.pin) payload.pin = form.pin;
 
     const { error } = await supabase.from('users').update(payload).eq('id', user.id).select().maybeSingle();
-
-    // Admin: update auth password if changed
-    if (!error && !isCashier && form.password.length >= 6) {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-staff-user`;
-      await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          user_id: user.id,
-          email: form.email.trim() || user.email,
-          password: form.password,
-          name: form.name.trim(),
-          pin: form.pin || user.pin,
-          site_id: form.site_id,
-          tenant_id: tenantId,
-        }),
-      });
-    }
-
-    // Cashier: update shared auth password if changed
-    if (!error && isCashier && form.cashierPassword.length >= 6) {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-staff-user`;
-      await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          update_cashier_password: true,
-          cashier_password: form.cashierPassword,
-          site_id: form.site_id,
-          tenant_id: tenantId,
-          // Required fields (reuse existing values)
-          name: form.name.trim(),
-          pin: form.pin || user.pin,
-        }),
-      });
-    }
 
     setSaving(false);
     if (error) { toast('error', `Erreur : ${error.message}`); return; }
@@ -294,76 +225,15 @@ function UserForm({
           />
         </div>
 
-        {/* Admin: email + mot de passe individuel */}
-        {!isCashier && (
-          <>
-            <div>
-              <label className="flex items-center gap-1.5 text-white/60 text-xs font-medium mb-2">
-                <Mail size={12} /> Email de connexion
-              </label>
-              <input
-                type="email"
-                value={form.email}
-                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                placeholder={selectedSite ? generateEmail('prenom', selectedSite.slug) : 'prenom@site.app'}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-blue-500/50 focus:bg-white/8 transition-all font-mono text-xs"
-              />
-              {user?.email && <p className="text-white/25 text-[10px] mt-1">Actuel : {user.email}</p>}
-            </div>
-            <div>
-              <label className="flex items-center gap-1.5 text-white/60 text-xs font-medium mb-2">
-                <Lock size={12} />
-                {user ? 'Nouveau mot de passe (laisser vide pour conserver)' : 'Mot de passe (min. 6 caractères)'}
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={form.password}
-                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                  placeholder="••••••••"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-blue-500/50 focus:bg-white/8 transition-all pr-10"
-                />
-                <button type="button" onClick={() => setShowPassword(s => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors">
-                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Caissier: email partagé + mot de passe partagé */}
-        {isCashier && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-amber-500/8 border border-amber-500/20">
-              <Mail size={13} className="text-amber-400/70 flex-shrink-0" />
-              <div>
-                <p className="text-amber-400/80 text-xs font-medium">Email de connexion partagé</p>
-                <p className="text-amber-400/50 text-[10px] font-mono mt-0.5">{cashierEmail}</p>
-              </div>
-            </div>
-            <div>
-              <label className="flex items-center gap-1.5 text-white/60 text-xs font-medium mb-2">
-                <Lock size={12} />
-                {user ? 'Nouveau mot de passe partagé (laisser vide pour conserver)' : 'Mot de passe partagé (optionnel)'}
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={form.cashierPassword}
-                  onChange={e => setForm(f => ({ ...f, cashierPassword: e.target.value }))}
-                  placeholder={`Défaut: Caisse-${slugify(selectedSite?.slug ?? 'site')}-2024!`}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-amber-500/50 focus:bg-white/8 transition-all pr-10 font-mono text-xs"
-                />
-                <button type="button" onClick={() => setShowPassword(s => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors">
-                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-              <p className="text-white/20 text-[10px] mt-1">Ce mot de passe s'applique à tous les caissiers du site. Si vide, un mot de passe par défaut sera généré.</p>
-            </div>
+        {/* Shared login info for all roles */}
+        <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-blue-500/8 border border-blue-500/20">
+          <Mail size={13} className="text-blue-400/70 flex-shrink-0" />
+          <div>
+            <p className="text-blue-400/80 text-xs font-medium">Email de connexion partagé</p>
+            <p className="text-blue-400/50 text-[10px] font-mono mt-0.5">{sharedEmail}</p>
+            <p className="text-white/30 text-[10px] mt-1">Tous les utilisateurs partagent cet email et un mot de passe commun. Chacun a son propre code PIN.</p>
           </div>
-        )}
+        </div>
         {/* Site assignment */}
         <div>
           <label className="flex items-center gap-1.5 text-white/60 text-xs font-medium mb-2">

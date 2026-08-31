@@ -29,6 +29,7 @@ export const defaultSettings: RestaurantSettings = {
   auto_print_receipt: false,
   print_kitchen_with_receipt: false,
   sauces_enabled: false,
+  flavors_enabled: false,
   address: '',
   phone: '',
   siret: '',

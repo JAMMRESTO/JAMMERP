@@ -141,6 +141,10 @@ export interface Product {
   sauce_required: boolean;
   sauce_count: number;
   allowed_sauce_ids: string[];
+  requires_flavor: boolean;
+  flavor_required: boolean;
+  flavor_count: number;
+  allowed_flavor_ids: string[];
   created_at: string;
   updated_at: string;
 }
@@ -157,6 +161,23 @@ export interface Sauce {
 }
 
 export interface SelectedSauce {
+  id: string;
+  name: string;
+  price_supplement: number;
+}
+
+export interface Flavor {
+  id: string;
+  site_id: string | null;
+  name: string;
+  price_supplement: number;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SelectedFlavor {
   id: string;
   name: string;
   price_supplement: number;
@@ -226,6 +247,7 @@ export interface SaleItem {
   variant_label: string;
   kitchen_note: string;
   sauces: SelectedSauce[];
+  flavors: SelectedFlavor[];
   created_at: string;
 }
 
@@ -300,6 +322,7 @@ export interface OrderItem {
   variant_label: string;
   kitchen_note: string;
   status: OrderItemStatus;
+  flavors: SelectedFlavor[];
   created_at: string;
 }
 
@@ -395,6 +418,7 @@ export interface CartItem {
   kitchen_note: string;
   unit_price: number;
   sauces: SelectedSauce[];
+  flavors: SelectedFlavor[];
 }
 
 // ============================================================
@@ -426,6 +450,7 @@ export interface RestaurantSettings {
   auto_print_receipt: boolean;
   print_kitchen_with_receipt: boolean;
   sauces_enabled: boolean;
+  flavors_enabled: boolean;
   address: string;
   phone: string;
   siret: string;
@@ -781,6 +806,7 @@ export interface Database {
       payments: { Row: Payment; Insert: Omit<Payment, 'id' | 'created_at'>; Update: Partial<Omit<Payment, 'id' | 'created_at'>>; };
       stock_movements: { Row: StockMovement; Insert: Omit<StockMovement, 'id' | 'created_at'>; Update: Partial<Omit<StockMovement, 'id' | 'created_at'>>; };
       sauces: { Row: Sauce; Insert: Omit<Sauce, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<Sauce, 'id' | 'created_at' | 'updated_at'>>; };
+      flavors: { Row: Flavor; Insert: Omit<Flavor, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<Flavor, 'id' | 'created_at' | 'updated_at'>>; };
     };
   };
 }

@@ -249,6 +249,7 @@ export interface SaleReceiptData {
     subtotal: number;
     variant_label?: string | null;
     sauces?: { name: string; price_supplement?: number }[] | null;
+    flavors?: { name: string }[] | null;
   }[];
   payments: { method: string; amount: number }[];
   subtotal: number;
@@ -310,7 +311,10 @@ export function buildSaleReceiptBody(
     const saucesLine = item.sauces && item.sauces.length > 0
       ? `<div style="font-size:11px;padding-left:24px;font-weight:700;">&#8627; Sauces : ${esc(item.sauces.map(s => s.name).join(', '))}</div>`
       : '';
-    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}${saucesLine}`;
+    const flavorsLine = item.flavors && item.flavors.length > 0
+      ? `<div style="font-size:11px;padding-left:24px;font-weight:700;">&#8627; Gouts : ${esc(item.flavors.map(f => f.name).join(', '))}</div>`
+      : '';
+    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}${saucesLine}${flavorsLine}`;
   }).join('');
 
   const totalsHtml = [
@@ -350,6 +354,7 @@ export interface KitchenTicketData {
     product_name: string;
     variant_label?: string | null;
     sauces?: { name: string }[] | null;
+    flavors?: { name: string }[] | null;
     kitchen_note?: string | null;
   }[];
 }
@@ -396,13 +401,16 @@ export function buildKitchenTicketBody(
     const saucesLine = item.sauces && item.sauces.length > 0
       ? `<div style="font-size:13px;padding-left:28px;font-weight:700;">&#8627; Sauces : ${esc(item.sauces.map(s => s.name).join(', '))}</div>`
       : '';
+    const flavorsLine = item.flavors && item.flavors.length > 0
+      ? `<div style="font-size:13px;padding-left:28px;font-weight:700;">&#8627; Gouts : ${esc(item.flavors.map(f => f.name).join(', '))}</div>`
+      : '';
     const note = item.kitchen_note
       ? `<div style="font-size:11px;padding-left:28px;font-style:italic;">&gt;&gt; ${esc(item.kitchen_note)}</div>`
       : '';
     return `<div class="item-row" style="font-size:14px;">
         <span class="qty" style="font-size:15px;">${item.quantity}x</span>
         <span class="desc" style="font-size:14px;white-space:normal;">${esc(item.product_name)}</span>
-      </div>${variant}${saucesLine}${note}`;
+      </div>${variant}${saucesLine}${flavorsLine}${note}`;
   }).join('');
 
   const notesHtml = data.orderNotes && data.orderNotes.trim()

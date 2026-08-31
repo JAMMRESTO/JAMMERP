@@ -1,0 +1,26 @@
+[functions.create-site-manager]
+verify_jwt = true
+
+[functions.create-staff-user]
+verify_jwt = true
+
+[functions.create-tenant-account]
+verify_jwt = false
+
+[functions.super-admin-users]
+verify_jwt = true
+
+[functions.backup-site]
+verify_jwt = true
+
+[functions.restore-site]
+verify_jwt = true
+
+[functions.reset-site]
+verify_jwt = true
+
+[functions.delete-tenant]
+verify_jwt = false
+
+[functions.notify-new-tenant]
+verify_jwt = false

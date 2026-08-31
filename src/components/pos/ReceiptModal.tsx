@@ -51,6 +51,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
         subtotal: i.subtotal,
         variant_label: i.variant_label,
         sauces: i.sauces ?? [],
+        flavors: i.flavors ?? [],
       })),
       payments: lastPayments.map(p => ({ method: p.method, amount: p.amount })),
       subtotal,
@@ -72,6 +73,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
               product_name: i.product_name,
               variant_label: i.variant_label,
               sauces: i.sauces ?? [],
+              flavors: i.flavors ?? [],
               kitchen_note: i.kitchen_note ?? '',
             })),
           },
@@ -151,6 +153,11 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
                     {item.sauces && item.sauces.length > 0 && (
                       <p className="text-amber-300/80 text-[11px] mt-0.5">
                         ↳ {item.sauces.map(s => s.name).join(', ')}
+                      </p>
+                    )}
+                    {item.flavors && item.flavors.length > 0 && (
+                      <p className="text-blue-300/80 text-[11px] mt-0.5">
+                        ↳ {item.flavors.map(f => f.name).join(', ')}
                       </p>
                     )}
                   </div>

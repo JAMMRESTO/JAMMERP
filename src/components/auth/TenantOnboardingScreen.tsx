@@ -4,7 +4,7 @@ import {
   ChefHat, Building2, Users, Rocket, Check, ArrowRight, ArrowLeft,
   Loader2, Plus, Trash2, Eye, EyeOff, Phone, MapPin,
   ShieldCheck, CreditCard, UtensilsCrossed, Truck, FlaskConical,
-  BarChart3, BookOpen, LayoutDashboard, LogOut, Mail, Lock,
+  BarChart3, BookOpen, LayoutDashboard, LogOut, Mail,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
@@ -15,12 +15,9 @@ import { useToast } from '../ui/Toast';
 interface NewUser {
   id: string;
   name: string;
-  email: string;
-  password: string;
   pin: string;
   role: 'admin' | 'cashier';
   showPin: boolean;
-  showPassword: boolean;
 }
 
 interface WizardData {
@@ -38,11 +35,7 @@ function slugify(str: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
-function generateEmail(name: string, siteSlug: string): string {
-  const part = slugify(name) || 'user';
-  const domain = slugify(siteSlug) || 'site';
-  return `${part}@${domain}.app`;
-}
+
 
 // ─── Plan features map ───────────────────────────────────────
 
@@ -287,36 +280,21 @@ function StepUsers({
     onUsersChange([...users, {
       id: crypto.randomUUID(),
       name: '',
-      email: '',
-      password: '',
       pin: '',
       role: 'cashier',
       showPin: false,
-      showPassword: false,
     }]);
   }
 
   function update(id: string, field: keyof NewUser, value: string | boolean) {
-    onUsersChange(users.map(u => {
-      if (u.id !== id) return u;
-      const updated = { ...u, [field]: value };
-      // Auto-generate email for admin when name changes
-      if (field === 'name' && u.role === 'admin' && siteSlug) {
-        updated.email = generateEmail(value as string, siteSlug);
-      }
-      return updated;
-    }));
+    onUsersChange(users.map(u => u.id === id ? { ...u, [field]: value } : u));
   }
 
   function remove(id: string) {
     onUsersChange(users.filter(u => u.id !== id));
   }
 
-  const canProceed = users.every(u => {
-    if (!u.name.trim() || u.pin.length !== 4) return false;
-    if (u.role === 'admin') return u.email.trim() !== '' && u.password.length >= 6;
-    return true; // cashier: name + pin only
-  });
+  const canProceed = users.every(u => u.name.trim() && u.pin.length === 4);
 
   return (
     <div className="space-y-5">
@@ -376,53 +354,13 @@ function StepUsers({
                   </div>
                 </div>
 
-                {/* Admin: email + mot de passe */}
-                {user.role === 'admin' && (
-                  <>
-                    <div>
-                      <label className="block text-white/40 text-[10px] font-medium mb-1 flex items-center gap-1">
-                        <Mail size={9} /> Email de connexion
-                      </label>
-                      <input
-                        type="email"
-                        value={user.email}
-                        onChange={e => update(user.id, 'email', e.target.value)}
-                        placeholder={`prenom@${slugify(siteSlug) || 'site'}.app`}
-                        className="w-full bg-white/6 border border-white/10 rounded-xl px-3 py-2 text-white text-xs placeholder-white/20 focus:outline-none focus:border-blue-500/40 transition-all font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-white/40 text-[10px] font-medium mb-1 flex items-center gap-1">
-                        <Lock size={9} /> Mot de passe
-                      </label>
-                      <div className="relative">
-                        <input
-                          type={user.showPassword ? 'text' : 'password'}
-                          value={user.password}
-                          onChange={e => update(user.id, 'password', e.target.value)}
-                          placeholder="Min. 6 caractères"
-                          className={`w-full bg-white/6 border rounded-xl px-3 py-2 text-white text-xs placeholder-white/20 focus:outline-none transition-all pr-8 ${
-                            user.password && user.password.length < 6 ? 'border-amber-500/40' : user.password.length >= 6 ? 'border-emerald-500/30' : 'border-white/10 focus:border-blue-500/40'
-                          }`}
-                        />
-                        <button type="button" onClick={() => update(user.id, 'showPassword', !user.showPassword)}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 transition-colors">
-                          {user.showPassword ? <EyeOff size={11} /> : <Eye size={11} />}
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Caissier: info email partagé */}
-                {user.role === 'cashier' && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/8 border border-amber-500/20">
-                    <Mail size={10} className="text-amber-400/70 flex-shrink-0" />
-                    <p className="text-amber-400/70 text-[10px]">
-                      Email partagé : <span className="font-mono">caisse@{slugify(siteSlug) || 'site'}.app</span>
-                    </p>
-                  </div>
-                )}
+                {/* Shared email info for all roles */}
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/8 border border-blue-500/20">
+                  <Mail size={10} className="text-blue-400/70 flex-shrink-0" />
+                  <p className="text-blue-400/70 text-[10px]">
+                    Email partagé : <span className="font-mono">caisse@{slugify(siteSlug) || 'site'}.app</span>
+                  </p>
+                </div>
 
                 {/* PIN */}
                 <div>
@@ -659,8 +597,6 @@ export function TenantOnboardingScreen() {
             },
             body: JSON.stringify({
               role: u.role,
-              email: u.role === 'admin' ? u.email.trim() : undefined,
-              password: u.role === 'admin' ? u.password : undefined,
               name: u.name.trim(),
               pin: u.pin,
               role_id: roleMap[u.role] ?? null,

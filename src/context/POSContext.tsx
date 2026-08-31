@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { useTenant } from './TenantContext';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import type {
-  CartItem, Product, SaleType, Sale, SaleItem, PaymentMethod, Customer, Sauce, SelectedSauce
+  CartItem, Product, SaleType, Sale, SaleItem, PaymentMethod, Customer, Sauce, SelectedSauce, Flavor, SelectedFlavor
 } from '../types/database';
 
 interface POSContextType {
@@ -17,13 +17,14 @@ interface POSContextType {
   orderNotes: string;
   discountAmount: number;
   sauces: Sauce[];
+  flavors: Flavor[];
   setSaleType: (t: SaleType) => void;
   setTableNumber: (v: string) => void;
   setCustomerName: (v: string) => void;
   setSelectedCustomer: (c: Customer | null) => void;
   setOrderNotes: (v: string) => void;
   setDiscountAmount: (v: number) => void;
-  addToCart: (product: Product, variantLabel?: string, variantPrice?: number, sauces?: SelectedSauce[]) => void;
+  addToCart: (product: Product, variantLabel?: string, variantPrice?: number, sauces?: SelectedSauce[], flavors?: SelectedFlavor[]) => void;
   removeFromCart: (itemId: string) => void;
   updateQuantity: (itemId: string, qty: number) => void;
   updateKitchenNote: (itemId: string, note: string) => void;
@@ -66,19 +67,28 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
   const [lastPayments, setLastPayments] = useState<{ method: PaymentMethod; amount: number; reference?: string }[]>([]);
   const [isPendingResume, setIsPendingResume] = useState(false);
   const [sauces, setSauces] = useState<Sauce[]>([]);
+  const [flavors, setFlavors] = useState<Flavor[]>([]);
 
   useEffect(() => {
-    if (!siteId) { setSauces([]); return; }
+    if (!siteId) { setSauces([]); setFlavors([]); return; }
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
+      const { data: sauceData } = await supabase
         .from('sauces')
         .select('*')
         .eq('site_id', siteId)
         .eq('is_active', true)
         .order('sort_order')
         .order('name');
-      if (!cancelled && data) setSauces(data as Sauce[]);
+      if (!cancelled && sauceData) setSauces(sauceData as Sauce[]);
+      const { data: flavorData } = await supabase
+        .from('flavors')
+        .select('*')
+        .eq('site_id', siteId)
+        .eq('is_active', true)
+        .order('sort_order')
+        .order('name');
+      if (!cancelled && flavorData) setFlavors(flavorData as Flavor[]);
     })();
     return () => { cancelled = true; };
   }, [siteId]);
@@ -91,14 +101,24 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
     onDelete: (row) => setSauces(s => s.filter(x => x.id !== row.id)),
   });
 
-  const addToCart = useCallback((product: Product, variantLabel = '', variantPrice?: number, saucesForItem: SelectedSauce[] = []) => {
+  useRealtimeTable<Flavor>({
+    table: 'flavors',
+    siteId,
+    onInsert: (row) => { if (row.is_active) setFlavors(s => s.some(x => x.id === row.id) ? s : [...s, row]); },
+    onUpdate: (row) => setFlavors(s => row.is_active ? (s.some(x => x.id === row.id) ? s.map(x => x.id === row.id ? row : x) : [...s, row]) : s.filter(x => x.id !== row.id)),
+    onDelete: (row) => setFlavors(s => s.filter(x => x.id !== row.id)),
+  });
+
+  const addToCart = useCallback((product: Product, variantLabel = '', variantPrice?: number, saucesForItem: SelectedSauce[] = [], flavorsForItem: SelectedFlavor[] = []) => {
     const unitPrice = variantPrice ?? product.price;
     const sauceKey = [...saucesForItem].map(s => s.id).sort().join(',');
+    const flavorKey = [...flavorsForItem].map(f => f.id).sort().join(',');
     setCart(prev => {
       const existing = prev.find(
         i => i.product.id === product.id
           && i.variant_label === variantLabel
           && [...i.sauces].map(s => s.id).sort().join(',') === sauceKey
+          && [...i.flavors].map(f => f.id).sort().join(',') === flavorKey
       );
       if (existing) {
         return prev.map(i =>
@@ -113,6 +133,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
         kitchen_note: '',
         unit_price: unitPrice,
         sauces: saucesForItem,
+        flavors: flavorsForItem,
       }];
     });
   }, []);
@@ -190,6 +211,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       variant_label: i.variant_label,
       kitchen_note: i.kitchen_note,
       sauces: i.sauces ?? [],
+      flavors: i.flavors ?? [],
     }));
 
     const { data: itemsData } = await supabase
@@ -251,6 +273,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       variant_label: i.variant_label,
       kitchen_note: i.kitchen_note,
       sauces: i.sauces ?? [],
+      flavors: i.flavors ?? [],
     }));
 
     const { data: itemsData } = await supabase
@@ -295,6 +318,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       kitchen_note: si.kitchen_note,
       unit_price: si.unit_price,
       sauces: Array.isArray(si.sauces) ? (si.sauces as SelectedSauce[]) : [],
+      flavors: Array.isArray(si.flavors) ? (si.flavors as SelectedFlavor[]) : [],
     }));
 
     setCart(newCart);
@@ -337,6 +361,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       orderNotes, setOrderNotes,
       discountAmount, setDiscountAmount,
       sauces,
+      flavors,
       addToCart, removeFromCart, updateQuantity, updateKitchenNote, clearCart,
       subtotal, taxAmount, total, itemCount,
       completeSale, deferSale, loadPendingSale, cancelSale, isPendingResume, currentSale, currentSaleItems, lastPayments,

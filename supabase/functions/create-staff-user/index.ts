@@ -49,7 +49,7 @@ Deno.serve(async (req: Request) => {
     const { name, pin, role, role_id, site_id, tenant_id, user_id,
             email, password, cashier_password, update_cashier_password } = body;
 
-    // ── UPDATE CASHIER SHARED PASSWORD ────────────────────────────────────────
+    // ── UPDATE SHARED PASSWORD ────────────────────────────────────────────────
     if (update_cashier_password) {
       if (!cashier_password || cashier_password.length < 6) {
         return new Response(JSON.stringify({ error: "Mot de passe trop court (min. 6 caractères)" }), {
@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       if (!siteRow?.cashier_auth_user_id) {
-        return new Response(JSON.stringify({ error: "Aucun compte caissier partagé trouvé pour ce site" }), {
+        return new Response(JSON.stringify({ error: "Aucun compte partagé trouvé pour ce site" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -105,111 +105,68 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const isCashier = role === "cashier";
+    // ── CREATE: all roles use the shared site auth account ────────────────────
+    // Every user (admin or cashier) logs in with the same shared email+password
+    // for their site. They are distinguished by their individual PIN.
+    const { data: siteRow } = await adminClient
+      .from("sites")
+      .select("id, slug, cashier_auth_user_id")
+      .eq("id", site_id)
+      .maybeSingle();
 
-    if (isCashier) {
-      // ── CASHIER: shared auth account per site ──────────────────────────────
-      const { data: siteRow } = await adminClient
-        .from("sites")
-        .select("id, slug, cashier_auth_user_id")
-        .eq("id", site_id)
-        .maybeSingle();
-
-      if (!siteRow) {
-        return new Response(JSON.stringify({ error: "Site introuvable" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      let cashierAuthId: string = siteRow.cashier_auth_user_id ?? "";
-      const cashierEmail = `caisse@${slugify(siteRow.slug) || "site"}.app`;
-      const defaultPassword = `Caisse-${slugify(siteRow.slug)}-2024!`;
-      const finalPassword = cashier_password && cashier_password.length >= 6 ? cashier_password : defaultPassword;
-
-      if (!cashierAuthId) {
-        // Create the shared cashier auth account for this site
-        const { data: newAuth, error: createErr } = await adminClient.auth.admin.createUser({
-          email: cashierEmail,
-          password: finalPassword,
-          user_metadata: { display_name: `Caissiers - ${siteRow.slug}` },
-          email_confirm: true,
-        });
-
-        if (createErr || !newAuth.user) {
-          return new Response(JSON.stringify({ error: createErr?.message ?? "Erreur création compte caissier" }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        cashierAuthId = newAuth.user.id;
-        await adminClient.from("sites").update({ cashier_auth_user_id: cashierAuthId }).eq("id", site_id);
-      } else if (cashier_password && cashier_password.length >= 6) {
-        // Update existing shared account password if explicitly provided
-        await adminClient.auth.admin.updateUserById(cashierAuthId, { password: cashier_password });
-      }
-
-      // Insert the individual cashier row in public.users
-      const { data: inserted, error: userErr } = await adminClient.from("users").insert({
-        id: crypto.randomUUID(),
-        name,
-        pin,
-        email: cashierEmail,
-        role_id: role_id ?? null,
-        site_id,
-        tenant_id,
-        is_active: true,
-      }).select("id").maybeSingle();
-
-      if (userErr) {
-        return new Response(JSON.stringify({ error: userErr.message }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      return new Response(JSON.stringify({ success: true, user_id: inserted?.id, cashier_email: cashierEmail }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // ── ADMIN / other roles: individual auth account ───────────────────────
-    if (!email || !password || password.length < 6) {
-      return new Response(JSON.stringify({ error: "Email et mot de passe requis pour ce rôle" }), {
+    if (!siteRow) {
+      return new Response(JSON.stringify({ error: "Site introuvable" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const { data: newAuth, error: createErr } = await adminClient.auth.admin.createUser({
-      email,
-      password,
-      user_metadata: { display_name: name },
-      email_confirm: true,
-    });
+    const sharedEmail = `caisse@${slugify(siteRow.slug) || "site"}.app`;
+    const defaultPassword = `Caisse-${slugify(siteRow.slug)}-2024!`;
+    const finalPassword = cashier_password && cashier_password.length >= 6 ? cashier_password : defaultPassword;
 
-    if (createErr || !newAuth.user) {
-      return new Response(JSON.stringify({ error: createErr?.message ?? "Erreur création compte" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    let sharedAuthId: string = siteRow.cashier_auth_user_id ?? "";
+
+    if (!sharedAuthId) {
+      // Create the shared auth account for this site
+      const { data: newAuth, error: createErr } = await adminClient.auth.admin.createUser({
+        email: sharedEmail,
+        password: finalPassword,
+        user_metadata: { display_name: `Équipe - ${siteRow.slug}` },
+        email_confirm: true,
       });
+
+      if (createErr || !newAuth.user) {
+        return new Response(JSON.stringify({ error: createErr?.message ?? "Erreur création compte partagé" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      sharedAuthId = newAuth.user.id;
+      await adminClient.from("sites").update({ cashier_auth_user_id: sharedAuthId }).eq("id", site_id);
+    } else if (cashier_password && cashier_password.length >= 6) {
+      // Update existing shared account password if explicitly provided
+      await adminClient.auth.admin.updateUserById(sharedAuthId, { password: cashier_password });
     }
 
-    const { error: userErr } = await adminClient.from("users").insert({
-      id: newAuth.user.id,
+    // Insert the individual user row in public.users
+    const { data: inserted, error: userErr } = await adminClient.from("users").insert({
+      id: crypto.randomUUID(),
       name,
       pin,
-      email,
+      email: sharedEmail,
       role_id: role_id ?? null,
       site_id,
       tenant_id,
       is_active: true,
-    });
+    }).select("id").maybeSingle();
 
     if (userErr) {
-      await adminClient.auth.admin.deleteUser(newAuth.user.id);
       return new Response(JSON.stringify({ error: userErr.message }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    return new Response(JSON.stringify({ success: true, user_id: newAuth.user.id }), {
+    return new Response(JSON.stringify({ success: true, user_id: inserted?.id, shared_email: sharedEmail }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 

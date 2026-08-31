@@ -7,7 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { useToast } from '../ui/Toast';
 import { useTenant } from '../../context/TenantContext';
 import { useSettings } from '../../context/SettingsContext';
-import type { Product, Category, ProductVariant, Sauce } from '../../types/database';
+import type { Product, Category, ProductVariant, Sauce, Flavor } from '../../types/database';
 
 const UNITS = ['pièce', 'kg', 'g', 'litre', 'cl', 'ml', 'portion', 'boîte', 'sachet', 'lot'];
 
@@ -15,11 +15,12 @@ interface ProductFormProps {
   product?: Product | null;
   categories: Category[];
   sauces?: Sauce[];
+  flavors?: Flavor[];
   onSave: () => void;
   onCancel: () => void;
 }
 
-export function ProductForm({ product, categories, sauces = [], onSave, onCancel }: ProductFormProps) {
+export function ProductForm({ product, categories, sauces = [], flavors = [], onSave, onCancel }: ProductFormProps) {
   const toast = useToast();
   const { currentSite } = useTenant();
   const { settings } = useSettings();
@@ -50,6 +51,10 @@ export function ProductForm({ product, categories, sauces = [], onSave, onCancel
       sauce_required: product?.sauce_required ?? false,
       sauce_count: Math.min(3, Math.max(1, product?.sauce_count ?? 1)),
       allowed_sauce_ids: (product?.allowed_sauce_ids as string[]) ?? [],
+      requires_flavor: product?.requires_flavor ?? false,
+      flavor_required: product?.flavor_required ?? false,
+      flavor_count: Math.min(3, Math.max(1, product?.flavor_count ?? 1)),
+      allowed_flavor_ids: (product?.allowed_flavor_ids as string[]) ?? [],
     };
   });
 
@@ -98,6 +103,15 @@ export function ProductForm({ product, categories, sauces = [], onSave, onCancel
       allowed_sauce_ids: prev.allowed_sauce_ids.includes(id)
         ? prev.allowed_sauce_ids.filter(x => x !== id)
         : [...prev.allowed_sauce_ids, id],
+    }));
+  }
+
+  function toggleAllowedFlavor(id: string) {
+    setForm(prev => ({
+      ...prev,
+      allowed_flavor_ids: prev.allowed_flavor_ids.includes(id)
+        ? prev.allowed_flavor_ids.filter(x => x !== id)
+        : [...prev.allowed_flavor_ids, id],
     }));
   }
 
@@ -416,6 +430,101 @@ export function ProductForm({ product, categories, sauces = [], onSave, onCancel
                         </div>
                       )}
                       <p className="text-white/25 text-[10px] mt-1.5">Aucune sélection = toutes les sauces actives seront proposées.</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {settings.flavors_enabled && (
+              <div className="bg-white/3 rounded-2xl border border-white/8 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Utensils size={14} className="text-white/40" />
+                    <h4 className="text-white/60 text-xs font-semibold uppercase tracking-wider">Gouts</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => f('requires_flavor', !form.requires_flavor)}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${form.requires_flavor ? 'bg-emerald-600' : 'bg-white/10'}`}
+                  >
+                    <motion.div
+                      animate={{ x: form.requires_flavor ? 16 : 2 }}
+                      transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+                      className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
+                    />
+                  </button>
+                </div>
+
+                {form.requires_flavor && (
+                  <>
+                    <p className="text-white/40 text-xs">
+                      L'écran de caisse ouvrira le choix des gouts après sélection de ce produit.
+                    </p>
+
+                    <div>
+                      <label className="text-white/60 text-xs font-medium block mb-1.5">Mode</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => f('flavor_required', true)}
+                          className={`px-3 py-2 rounded-xl border text-xs transition-all ${form.flavor_required ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80'}`}
+                        >
+                          Obligatoire
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => f('flavor_required', false)}
+                          className={`px-3 py-2 rounded-xl border text-xs transition-all ${!form.flavor_required ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80'}`}
+                        >
+                          Facultative
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-white/60 text-xs font-medium block mb-1.5">Nombre de gouts</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[1, 2, 3].map(n => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => f('flavor_count', n)}
+                            className={`px-3 py-2 rounded-xl border text-xs font-medium transition-all ${form.flavor_count === n ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80'}`}
+                          >
+                            {n === 1 ? '1 gout' : `${n} gouts`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-white/60 text-xs font-medium block mb-1.5">
+                        Gouts autorisés <span className="text-white/30">({form.allowed_flavor_ids.length === 0 ? 'tous' : `${form.allowed_flavor_ids.length} sélection${form.allowed_flavor_ids.length > 1 ? 's' : ''}`})</span>
+                      </label>
+                      {flavors.filter(fl => fl.is_active).length === 0 ? (
+                        <p className="text-white/40 text-xs p-3 rounded-xl bg-white/3 border border-white/8">
+                          Aucun gout actif. Créez d'abord des gouts via "Gérer les gouts".
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {flavors.filter(fl => fl.is_active).map(fl => {
+                            const selected = form.allowed_flavor_ids.length === 0 || form.allowed_flavor_ids.includes(fl.id);
+                            const explicitlySelected = form.allowed_flavor_ids.includes(fl.id);
+                            return (
+                              <button
+                                key={fl.id}
+                                type="button"
+                                onClick={() => toggleAllowedFlavor(fl.id)}
+                                className={`px-3 py-1.5 rounded-xl border text-xs transition-all ${explicitlySelected ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : selected ? 'bg-white/5 border-white/10 text-white/60' : 'bg-white/3 border-white/5 text-white/30'}`}
+                              >
+                                {fl.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <p className="text-white/25 text-[10px] mt-1.5">Aucune sélection = tous les gouts actifs seront proposés.</p>
                     </div>
                   </>
                 )}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertCircle, ChevronDown, X, Utensils, Check } from 'lucide-react';
-import type { Product, ProductVariant, Sauce, SelectedSauce } from '../../types/database';
+import type { Product, ProductVariant, Sauce, SelectedSauce, Flavor, SelectedFlavor } from '../../types/database';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 
@@ -221,24 +221,158 @@ function SauceModal({ product, sauces, required, maxCount, onConfirm, onClose }:
   );
 }
 
+interface FlavorModalProps {
+  product: Product;
+  flavors: Flavor[];
+  required: boolean;
+  maxCount: number;
+  onConfirm: (flavors: SelectedFlavor[]) => void;
+  onClose: () => void;
+}
+
+function FlavorModal({ product, flavors, required, maxCount, onConfirm, onClose }: FlavorModalProps) {
+  const [selected, setSelected] = useState<Flavor[]>([]);
+
+  function toggle(flavor: Flavor) {
+    setSelected(prev => {
+      if (prev.some(f => f.id === flavor.id)) {
+        return prev.filter(f => f.id !== flavor.id);
+      }
+      if (prev.length >= maxCount) {
+        if (maxCount === 1) return [flavor];
+        return prev;
+      }
+      return [...prev, flavor];
+    });
+  }
+
+  function handleConfirm() {
+    const payload: SelectedFlavor[] = selected.map(f => ({
+      id: f.id, name: f.name, price_supplement: 0,
+    }));
+    onConfirm(payload);
+  }
+
+  const canConfirm = required ? selected.length > 0 : true;
+  const helper = required
+    ? maxCount === 1 ? 'Choisissez 1 gout' : `Choisissez ${maxCount} gout${maxCount > 1 ? 's' : ''}`
+    : maxCount === 1 ? 'Choisissez au plus 1 gout (facultatif)' : `Choisissez au plus ${maxCount} gouts (facultatif)`;
+
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        key="flavor-backdrop"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4"
+        onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <motion.div
+          key="flavor-panel"
+          initial={{ y: 32, opacity: 0, scale: 0.97 }}
+          animate={{ y: 0, opacity: 1, scale: 1 }}
+          exit={{ y: 32, opacity: 0, scale: 0.97 }}
+          transition={{ type: 'spring', damping: 26, stiffness: 320 }}
+          className="w-full max-w-sm bg-gray-900 border border-white/12 rounded-3xl shadow-2xl overflow-hidden"
+        >
+          <div className="flex items-start justify-between p-5 pb-4 border-b border-white/8">
+            <div className="flex gap-3 items-center min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center flex-shrink-0">
+                <Utensils size={16} className="text-blue-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white font-bold text-base leading-tight truncate">{product.name}</p>
+                <p className="text-white/40 text-xs mt-0.5">{helper}</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="flex-shrink-0 w-8 h-8 rounded-xl bg-white/8 hover:bg-white/14 flex items-center justify-center text-white/40 hover:text-white transition-all ml-2"
+            >
+              <X size={15} />
+            </button>
+          </div>
+
+          <div className="p-5 pt-4 max-h-[55vh] overflow-y-auto">
+            <div className="flex flex-col gap-2">
+              {flavors.length === 0 ? (
+                <p className="text-white/40 text-sm text-center py-6">Aucun gout disponible</p>
+              ) : flavors.map(f => {
+                const isSelected = selected.some(x => x.id === f.id);
+                const disabled = !isSelected && selected.length >= maxCount && maxCount > 1;
+                return (
+                  <motion.button
+                    key={f.id}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => toggle(f)}
+                    disabled={disabled}
+                    className={`w-full px-4 py-3 rounded-2xl border text-left transition-all flex items-center justify-between gap-3
+                      ${isSelected
+                        ? 'bg-blue-500/15 border-blue-500/40 text-blue-100'
+                        : disabled
+                          ? 'bg-white/2 border-white/5 text-white/25'
+                          : 'bg-white/5 hover:bg-blue-500/10 border-white/10 hover:border-blue-500/30 text-white'}`}
+                  >
+                    <span className="text-sm font-medium truncate">{f.name}</span>
+                    <span className={`w-5 h-5 rounded-md border flex items-center justify-center ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
+                      {isSelected && <Check size={13} className="text-white" strokeWidth={3} />}
+                    </span>
+                  </motion.button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="p-5 pt-0 flex gap-2">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-2xl bg-white/4 hover:bg-white/8 text-white/50 hover:text-white/80 text-sm transition-all"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={!canConfirm}
+              className="flex-1 py-2.5 rounded-2xl bg-blue-500 hover:bg-blue-400 disabled:opacity-30 disabled:cursor-not-allowed text-white text-sm font-semibold transition-all"
+            >
+              Valider {selected.length > 0 && `(${selected.length})`}
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>,
+    document.body
+  );
+}
+
 interface ProductCardProps {
   product: Product;
 }
 
 function ProductCard({ product }: ProductCardProps) {
-  const { addToCart, sauces: allSauces } = usePOS();
+  const { addToCart, sauces: allSauces, flavors: allFlavors } = usePOS();
   const { settings } = useSettings();
   const [showVariants, setShowVariants] = useState(false);
   const [pendingVariant, setPendingVariant] = useState<{ label: string; price?: number } | null>(null);
   const [showSauces, setShowSauces] = useState(false);
+  const [showFlavors, setShowFlavors] = useState(false);
+  const [pendingSauces, setPendingSauces] = useState<SelectedSauce[]>([]);
   const [added, setAdded] = useState(false);
   const hasVariants = (product.variants as ProductVariant[]).length > 0;
   const needsSauce = settings.sauces_enabled && product.requires_sauce;
+  const needsFlavor = settings.flavors_enabled && product.requires_flavor;
 
   const availableSauces = needsSauce
     ? (product.allowed_sauce_ids && product.allowed_sauce_ids.length > 0
         ? allSauces.filter(s => product.allowed_sauce_ids.includes(s.id))
         : allSauces)
+    : [];
+
+  const availableFlavors = needsFlavor
+    ? (product.allowed_flavor_ids && product.allowed_flavor_ids.length > 0
+        ? allFlavors.filter(fl => product.allowed_flavor_ids.includes(fl.id))
+        : allFlavors)
     : [];
 
   function handleAdd() {
@@ -251,7 +385,12 @@ function ProductCard({ product }: ProductCardProps) {
       setShowSauces(true);
       return;
     }
-    finalize('', undefined, []);
+    if (needsFlavor && availableFlavors.length > 0) {
+      setPendingVariant({ label: '', price: undefined });
+      setShowFlavors(true);
+      return;
+    }
+    finalize('', undefined, [], []);
   }
 
   function handleVariantSelect(label: string, price?: number) {
@@ -261,18 +400,36 @@ function ProductCard({ product }: ProductCardProps) {
       setShowSauces(true);
       return;
     }
-    finalize(label, price, []);
+    if (needsFlavor && availableFlavors.length > 0) {
+      setPendingVariant({ label, price });
+      setShowFlavors(true);
+      return;
+    }
+    finalize(label, price, [], []);
   }
 
   function handleSaucesConfirm(selected: SelectedSauce[]) {
-    const v = pendingVariant ?? { label: '', price: undefined };
     setShowSauces(false);
+    if (needsFlavor && availableFlavors.length > 0) {
+      setPendingSauces(selected);
+      setShowFlavors(true);
+      return;
+    }
+    const v = pendingVariant ?? { label: '', price: undefined };
     setPendingVariant(null);
-    finalize(v.label, v.price, selected);
+    finalize(v.label, v.price, selected, []);
   }
 
-  function finalize(variant: string, price: number | undefined, saucesForItem: SelectedSauce[]) {
-    addToCart(product, variant, price, saucesForItem);
+  function handleFlavorsConfirm(selected: SelectedFlavor[]) {
+    const v = pendingVariant ?? { label: '', price: undefined };
+    setShowFlavors(false);
+    setPendingVariant(null);
+    setPendingSauces([]);
+    finalize(v.label, v.price, pendingSauces, selected);
+  }
+
+  function finalize(variant: string, price: number | undefined, saucesForItem: SelectedSauce[], flavorsForItem: SelectedFlavor[]) {
+    addToCart(product, variant, price, saucesForItem, flavorsForItem);
     setAdded(true);
     setTimeout(() => setAdded(false), 600);
   }
@@ -297,6 +454,16 @@ function ProductCard({ product }: ProductCardProps) {
           maxCount={Math.min(3, Math.max(1, product.sauce_count ?? 1))}
           onConfirm={handleSaucesConfirm}
           onClose={() => { setShowSauces(false); setPendingVariant(null); }}
+        />
+      )}
+      {showFlavors && (
+        <FlavorModal
+          product={product}
+          flavors={availableFlavors}
+          required={product.flavor_required}
+          maxCount={Math.min(3, Math.max(1, product.flavor_count ?? 1))}
+          onConfirm={handleFlavorsConfirm}
+          onClose={() => { setShowFlavors(false); setPendingVariant(null); setPendingSauces([]); }}
         />
       )}
     <motion.div
@@ -343,6 +510,11 @@ function ProductCard({ product }: ProductCardProps) {
         {needsSauce && !unavailable && (
           <div className="absolute top-1 left-1 bg-amber-500/25 border border-amber-500/40 rounded-md px-1 py-0.5 flex items-center gap-0.5" title="Choix de sauce requis">
             <Utensils size={8} className="text-amber-200" />
+          </div>
+        )}
+        {needsFlavor && !unavailable && (
+          <div className="absolute top-1 left-1 bg-blue-500/25 border border-blue-500/40 rounded-md px-1 py-0.5 flex items-center gap-0.5" title="Choix de gout requis" style={{ left: needsSauce ? '20px' : '4px' }}>
+            <Utensils size={8} className="text-blue-200" />
           </div>
         )}
       </div>
