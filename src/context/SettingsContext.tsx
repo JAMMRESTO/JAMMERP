@@ -27,6 +27,8 @@ export const defaultSettings: RestaurantSettings = {
   },
   receipt_footer: 'Merci pour votre visite!',
   auto_print_receipt: false,
+  print_kitchen_with_receipt: false,
+  sauces_enabled: false,
   address: '',
   phone: '',
   siret: '',

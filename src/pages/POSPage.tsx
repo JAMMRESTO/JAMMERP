@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, LogOut, Power, CreditCard, Receipt } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
-import { buildSaleReceiptHtml, printViaIframe } from '../lib/printUtils';
+import { buildSaleReceiptHtml, buildCombinedKitchenAndReceiptHtml, printViaIframe } from '../lib/printUtils';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
 import { useTenant } from '../context/TenantContext';
@@ -28,11 +28,12 @@ const saleTypes: { id: SaleType; label: string; icon: typeof Utensils }[] = [
 
 function POSInner() {
   const {
-    itemCount, clearCart, saleType, setSaleType,
+    cart, itemCount, clearCart, saleType, setSaleType,
     tableNumber, setTableNumber,
     selectedCustomer, setSelectedCustomer, customerName,
     isPendingResume, total: usePOSTotal,
     subtotal, taxAmount, discountAmount,
+    orderNotes,
   } = usePOS();
   const { settings } = useSettings();
   const { currentUser, lockSession, logout } = useAuth();
@@ -148,26 +149,44 @@ function POSInner() {
     return list;
   }, [products, selectedCategoryId, search]);
 
-  function handlePaymentSuccess(result: { sale: { sale_number: string; created_at: string }; items: { quantity: number; product_name: string; unit_price: number; subtotal: number; variant_label?: string | null }[]; payments: { method: string; amount: number }[] }) {
+  function handlePaymentSuccess(result: { sale: { sale_number: string; created_at: string }; items: { quantity: number; product_name: string; unit_price: number; subtotal: number; variant_label?: string | null; sauces?: { name: string; price_supplement?: number }[] | null }[]; payments: { method: string; amount: number }[] }) {
     setShowPayment(false);
     if (settings.auto_print_receipt) {
-      const html = buildSaleReceiptHtml(
-        {
-          saleNumber: result.sale.sale_number,
-          createdAt: result.sale.created_at,
-          saleType,
-          tableNumber,
-          cashierName: currentUser?.name ?? null,
-          customerName: selectedCustomer ? selectedCustomer.name : customerName,
-          items: result.items,
-          payments: result.payments,
-          subtotal,
-          taxAmount,
-          discountAmount,
-          total: usePOSTotal,
-        },
-        settings
-      );
+      const receiptData = {
+        saleNumber: result.sale.sale_number,
+        createdAt: result.sale.created_at,
+        saleType,
+        tableNumber,
+        cashierName: currentUser?.name ?? null,
+        customerName: selectedCustomer ? selectedCustomer.name : customerName,
+        items: result.items,
+        payments: result.payments,
+        subtotal,
+        taxAmount,
+        discountAmount,
+        total: usePOSTotal,
+      };
+      const html = settings.print_kitchen_with_receipt
+        ? buildCombinedKitchenAndReceiptHtml(
+            {
+              createdAt: result.sale.created_at,
+              saleType,
+              tableNumber,
+              cashierName: currentUser?.name ?? null,
+              customerName: selectedCustomer ? selectedCustomer.name : customerName,
+              orderNotes,
+              items: cart.map(item => ({
+                quantity: item.quantity,
+                product_name: item.product.name,
+                variant_label: item.variant_label,
+                sauces: item.sauces,
+                kitchen_note: item.kitchen_note,
+              })),
+            },
+            receiptData,
+            settings
+          )
+        : buildSaleReceiptHtml(receiptData, settings);
       printViaIframe(html);
       clearCart();
       setShowCartMobile(false);

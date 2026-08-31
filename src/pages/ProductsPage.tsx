@@ -1,28 +1,36 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Utensils } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { useTenant } from '../context/TenantContext';
+import { useSettings } from '../context/SettingsContext';
 import { ProductList } from '../components/inventory/ProductList';
 import { ProductForm } from '../components/inventory/ProductForm';
-import type { Product, Category } from '../types/database';
+import { SauceManagerModal } from '../components/inventory/SauceManager';
+import type { Product, Category, Sauce } from '../types/database';
 
 export function ProductsPage() {
   const { currentSite } = useTenant();
+  const { settings } = useSettings();
   const siteId = currentSite?.id ?? null;
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [sauces, setSauces] = useState<Sauce[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingProduct, setEditingProduct] = useState<Product | null | undefined>(undefined);
+  const [showSauces, setShowSauces] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!siteId) return;
-    const [prodRes, catRes] = await Promise.all([
+    const [prodRes, catRes, sauceRes] = await Promise.all([
       supabase.from('products').select('*').eq('site_id', siteId).order('name'),
       supabase.from('categories').select('*').eq('site_id', siteId).order('sort_order'),
+      supabase.from('sauces').select('*').eq('site_id', siteId).order('sort_order').order('name'),
     ]);
     if (prodRes.data) setProducts(prodRes.data as Product[]);
     if (catRes.data) setCategories(catRes.data as Category[]);
+    if (sauceRes.data) setSauces(sauceRes.data as Sauce[]);
     setLoading(false);
   }, [siteId]);
 
@@ -44,6 +52,14 @@ export function ProductsPage() {
     onDelete: (row) => setCategories(c => c.filter(x => x.id !== row.id)),
   });
 
+  useRealtimeTable<Sauce>({
+    table: 'sauces',
+    siteId,
+    onInsert: (row) => setSauces(s => s.some(x => x.id === row.id) ? s : [...s, row].sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name))),
+    onUpdate: (row) => setSauces(s => s.map(x => x.id === row.id ? row : x)),
+    onDelete: (row) => setSauces(s => s.filter(x => x.id !== row.id)),
+  });
+
   const showingForm = editingProduct !== undefined;
 
   if (loading) {
@@ -60,6 +76,18 @@ export function ProductsPage() {
   return (
     <div className="h-full flex overflow-hidden">
       <div className={`flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 ${showingForm ? 'hidden lg:block lg:w-0 lg:overflow-hidden lg:p-0' : ''}`}>
+        {settings.sauces_enabled && (
+          <div className="mb-3 sm:mb-4 flex justify-end">
+            <button
+              onClick={() => setShowSauces(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-xs sm:text-sm transition-all"
+            >
+              <Utensils size={14} />
+              Gérer les sauces
+              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-white/8 text-white/50 text-[10px]">{sauces.length}</span>
+            </button>
+          </div>
+        )}
         <ProductList
           products={products}
           categories={categories}
@@ -81,12 +109,15 @@ export function ProductsPage() {
             <ProductForm
               product={editingProduct ?? null}
               categories={categories}
+              sauces={sauces}
               onSave={() => { setEditingProduct(undefined); }}
               onCancel={() => setEditingProduct(undefined)}
             />
           </motion.div>
         )}
       </AnimatePresence>
+
+      <SauceManagerModal open={showSauces} onClose={() => setShowSauces(false)} />
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
 import { AdminPinModal } from './AdminPinModal';
-import { printViaIframe, buildSaleReceiptHtml } from '../../lib/printUtils';
+import { printViaIframe, buildSaleReceiptHtml, buildCombinedKitchenAndReceiptHtml } from '../../lib/printUtils';
 import type { UserWithRole } from '../../types/database';
 
 const saleTypeLabels = {
@@ -23,7 +23,7 @@ interface ReceiptModalProps {
 }
 
 export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
-  const { currentSale, currentSaleItems, total, subtotal, taxAmount, discountAmount, saleType, tableNumber, customerName, selectedCustomer, lastPayments, cancelSale } = usePOS();
+  const { currentSale, currentSaleItems, total, subtotal, taxAmount, discountAmount, saleType, tableNumber, customerName, selectedCustomer, lastPayments, cancelSale, orderNotes } = usePOS();
   const { settings } = useSettings();
   const { currentUser } = useAuth();
   const receiptRef = useRef<HTMLDivElement>(null);
@@ -37,29 +37,48 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
   const SaleTypeIcon = saleTypeLabels[saleType].icon;
 
   function handlePrint() {
-    const html = buildSaleReceiptHtml(
-      {
-        saleNumber: sale.sale_number,
-        createdAt: sale.created_at,
-        saleType,
-        tableNumber,
-        cashierName: currentUser?.name ?? null,
-        customerName: selectedCustomer ? selectedCustomer.name : customerName,
-        items: currentSaleItems.map(i => ({
-          quantity: i.quantity,
-          product_name: i.product_name,
-          unit_price: i.unit_price,
-          subtotal: i.subtotal,
-          variant_label: i.variant_label,
-        })),
-        payments: lastPayments.map(p => ({ method: p.method, amount: p.amount })),
-        subtotal,
-        taxAmount,
-        discountAmount,
-        total,
-      },
-      settings
-    );
+    const receiptData = {
+      saleNumber: sale.sale_number,
+      createdAt: sale.created_at,
+      saleType,
+      tableNumber,
+      cashierName: currentUser?.name ?? null,
+      customerName: selectedCustomer ? selectedCustomer.name : customerName,
+      items: currentSaleItems.map(i => ({
+        quantity: i.quantity,
+        product_name: i.product_name,
+        unit_price: i.unit_price,
+        subtotal: i.subtotal,
+        variant_label: i.variant_label,
+        sauces: i.sauces ?? [],
+      })),
+      payments: lastPayments.map(p => ({ method: p.method, amount: p.amount })),
+      subtotal,
+      taxAmount,
+      discountAmount,
+      total,
+    };
+    const html = settings.print_kitchen_with_receipt
+      ? buildCombinedKitchenAndReceiptHtml(
+          {
+            createdAt: sale.created_at,
+            saleType,
+            tableNumber,
+            cashierName: currentUser?.name ?? null,
+            customerName: selectedCustomer ? selectedCustomer.name : customerName,
+            orderNotes,
+            items: currentSaleItems.map(i => ({
+              quantity: i.quantity,
+              product_name: i.product_name,
+              variant_label: i.variant_label,
+              sauces: i.sauces ?? [],
+              kitchen_note: i.kitchen_note ?? '',
+            })),
+          },
+          receiptData,
+          settings
+        )
+      : buildSaleReceiptHtml(receiptData, settings);
 
     printViaIframe(html);
     onClose();
@@ -122,12 +141,19 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
             {/* Items */}
             <div className="space-y-2 border-t border-dashed border-white/10 pt-3">
               {currentSaleItems.map(item => (
-                <div key={item.id} className="flex justify-between text-sm">
-                  <span className="text-white/70">
-                    <span className="text-white/40 mr-1">{item.quantity}x</span>
-                    {item.product_name}
-                    {item.variant_label && <span className="text-white/30 text-xs ml-1">({item.variant_label})</span>}
-                  </span>
+                <div key={item.id} className="flex justify-between text-sm gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-white/70">
+                      <span className="text-white/40 mr-1">{item.quantity}x</span>
+                      {item.product_name}
+                      {item.variant_label && <span className="text-white/30 text-xs ml-1">({item.variant_label})</span>}
+                    </span>
+                    {item.sauces && item.sauces.length > 0 && (
+                      <p className="text-amber-300/80 text-[11px] mt-0.5">
+                        ↳ {item.sauces.map(s => s.name).join(', ')}
+                      </p>
+                    )}
+                  </div>
                   <span className="text-white font-medium flex-shrink-0 ml-3">
                     {item.subtotal.toLocaleString('fr-FR')} {sym}
                   </span>

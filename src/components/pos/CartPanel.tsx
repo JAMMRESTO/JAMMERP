@@ -7,7 +7,7 @@ import {
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
-import { esc, THERMAL_CSS, buildThermalHeader, printViaIframe } from '../../lib/printUtils';
+import { buildKitchenTicketHtml, printViaIframe } from '../../lib/printUtils';
 import type { CartItem, SaleType } from '../../types/database';
 
 function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
@@ -38,6 +38,11 @@ function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
             {item.unit_price.toLocaleString('fr-FR')} {settings.currency_symbol}
             {item.variant_label && <span className="ml-1" style={{ color: 'var(--color-primary)' }}>· {item.variant_label}</span>}
           </p>
+          {item.sauces && item.sauces.length > 0 && (
+            <p className="text-amber-300/80 text-[9px] sm:text-[10px] mt-0.5 truncate">
+              ↳ {item.sauces.map(s => s.name).join(', ')}
+            </p>
+          )}
         </div>
 
         {/* Qty controls */}
@@ -136,73 +141,24 @@ export function CartPanel({ onCheckout }: CartPanelProps) {
 
   function handlePrintKitchen() {
     if (cart.length === 0) return;
-
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-    const row = (left: string, right: string) =>
-      `<div class="row"><span class="lbl">${esc(left)}</span><span class="val">${esc(right)}</span></div>`;
-
-    const headerHtml = buildThermalHeader(settings);
-
-    const clientName = selectedCustomer?.name || customerName;
-
-    const metaHtml = [
-      `<div class="banner">TICKET CUISINE</div>`,
-      row(`Date : ${dateStr}`, `Heure : ${timeStr}`),
-      row('Caissier :', currentUser?.name ?? 'N/A'),
-      row('Type :', saleTypeKitchenLabel[saleType]),
-      ...(saleType === 'dine_in' && tableNumber ? [row('Table :', tableNumber)] : []),
-      ...(saleType !== 'dine_in' && clientName ? [row('Client :', clientName)] : []),
-      `<hr class="sep-solid">`,
-    ].join('\n');
-
-    const itemsHtml = cart.map(item => {
-      const variant = item.variant_label
-        ? `<div style="font-size:11px;padding-left:28px;font-weight:700;">[${esc(item.variant_label)}]</div>`
-        : '';
-      const note = item.kitchen_note
-        ? `<div style="font-size:11px;padding-left:28px;font-style:italic;">>> ${esc(item.kitchen_note)}</div>`
-        : '';
-      return `<div class="item-row" style="font-size:14px;">
-          <span class="qty" style="font-size:15px;">${item.quantity}x</span>
-          <span class="desc" style="font-size:14px;white-space:normal;">${esc(item.product.name)}</span>
-        </div>${variant}${note}`;
-    }).join('');
-
-    const notesHtml = orderNotes.trim()
-      ? [
-          `<hr class="sep">`,
-          `<div class="section-title">NOTE COMMANDE</div>`,
-          `<div style="font-size:12px;font-weight:700;">${esc(orderNotes)}</div>`,
-        ].join('\n')
-      : '';
-
-    const footerHtml = [
-      `<hr class="sep-solid">`,
-      `<div class="footer">Ticket de préparation cuisine</div>`,
-      `<div class="footer">${esc(dateStr)} · ${esc(timeStr)}</div>`,
-    ].join('\n');
-
-    const html = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="color-scheme" content="only light">
-  <title>Ticket cuisine</title>
-  <style>${THERMAL_CSS}</style>
-</head>
-<body>
-  ${headerHtml}
-  ${metaHtml}
-  ${itemsHtml}
-  ${notesHtml}
-  ${footerHtml}
-  <script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
-</body>
-</html>`;
-
+    const html = buildKitchenTicketHtml(
+      {
+        createdAt: new Date().toISOString(),
+        saleType,
+        tableNumber,
+        cashierName: currentUser?.name ?? null,
+        customerName: selectedCustomer?.name || customerName,
+        orderNotes,
+        items: cart.map(item => ({
+          quantity: item.quantity,
+          product_name: item.product.name,
+          variant_label: item.variant_label,
+          sauces: item.sauces,
+          kitchen_note: item.kitchen_note,
+        })),
+      },
+      settings
+    );
     printViaIframe(html);
   }
 

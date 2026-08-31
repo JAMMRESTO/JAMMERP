@@ -321,6 +321,8 @@ export function SettingsPage() {
     accent_color: settings.accent_color,
     receipt_footer: settings.receipt_footer,
     auto_print_receipt: settings.auto_print_receipt ?? false,
+    print_kitchen_with_receipt: settings.print_kitchen_with_receipt ?? false,
+    sauces_enabled: settings.sauces_enabled ?? false,
     active_modules: { ...settings.active_modules },
     dashboard_widgets: { ...settings.dashboard_widgets },
   });
@@ -342,6 +344,8 @@ export function SettingsPage() {
       accent_color: settings.accent_color,
       receipt_footer: settings.receipt_footer,
       auto_print_receipt: settings.auto_print_receipt ?? false,
+      print_kitchen_with_receipt: settings.print_kitchen_with_receipt ?? false,
+      sauces_enabled: settings.sauces_enabled ?? false,
       active_modules: { ...settings.active_modules },
       dashboard_widgets: { ...settings.dashboard_widgets },
     });
@@ -364,6 +368,8 @@ export function SettingsPage() {
       updateSetting('accent_color', form.accent_color),
       updateSetting('receipt_footer', form.receipt_footer),
       updateSetting('auto_print_receipt', form.auto_print_receipt),
+      updateSetting('print_kitchen_with_receipt', form.print_kitchen_with_receipt),
+      updateSetting('sauces_enabled', form.sauces_enabled),
       updateSetting('active_modules', form.active_modules),
       updateSetting('dashboard_widgets', form.dashboard_widgets),
     ]);
@@ -578,6 +584,42 @@ export function SettingsPage() {
                 <Toggle
                   checked={form.auto_print_receipt}
                   onChange={v => setForm(f => ({ ...f, auto_print_receipt: v }))}
+                />
+              </div>
+              <div
+                className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${form.print_kitchen_with_receipt ? '' : 'border-white/8 bg-white/3'}`}
+                style={form.print_kitchen_with_receipt ? {
+                  borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
+                } : undefined}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm">Imprimer aussi le ticket cuisine avec le reçu</p>
+                  <p className="text-white/30 text-xs mt-0.5">
+                    Sort les deux tickets d'affilée sur la même imprimante quand une vente est payée, sans avoir à cliquer deux fois.
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.print_kitchen_with_receipt}
+                  onChange={v => setForm(f => ({ ...f, print_kitchen_with_receipt: v }))}
+                />
+              </div>
+              <div
+                className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${form.sauces_enabled ? '' : 'border-white/8 bg-white/3'}`}
+                style={form.sauces_enabled ? {
+                  borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
+                } : undefined}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm">Gestion des sauces</p>
+                  <p className="text-white/30 text-xs mt-0.5">
+                    Active un catalogue de sauces et permet d'exiger un choix de sauce sur certains produits (visible en caisse, sur le reçu et le ticket cuisine).
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.sauces_enabled}
+                  onChange={v => setForm(f => ({ ...f, sauces_enabled: v }))}
                 />
               </div>
             </div>

@@ -1,9 +1,10 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { useTenant } from './TenantContext';
+import { useRealtimeTable } from '../lib/useRealtimeTable';
 import type {
-  CartItem, Product, SaleType, Sale, SaleItem, PaymentMethod, Customer
+  CartItem, Product, SaleType, Sale, SaleItem, PaymentMethod, Customer, Sauce, SelectedSauce
 } from '../types/database';
 
 interface POSContextType {
@@ -15,13 +16,14 @@ interface POSContextType {
   selectedCustomer: Customer | null;
   orderNotes: string;
   discountAmount: number;
+  sauces: Sauce[];
   setSaleType: (t: SaleType) => void;
   setTableNumber: (v: string) => void;
   setCustomerName: (v: string) => void;
   setSelectedCustomer: (c: Customer | null) => void;
   setOrderNotes: (v: string) => void;
   setDiscountAmount: (v: number) => void;
-  addToCart: (product: Product, variantLabel?: string, variantPrice?: number) => void;
+  addToCart: (product: Product, variantLabel?: string, variantPrice?: number, sauces?: SelectedSauce[]) => void;
   removeFromCart: (itemId: string) => void;
   updateQuantity: (itemId: string, qty: number) => void;
   updateKitchenNote: (itemId: string, note: string) => void;
@@ -63,11 +65,40 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
   const [currentSaleItems, setCurrentSaleItems] = useState<SaleItem[]>([]);
   const [lastPayments, setLastPayments] = useState<{ method: PaymentMethod; amount: number; reference?: string }[]>([]);
   const [isPendingResume, setIsPendingResume] = useState(false);
+  const [sauces, setSauces] = useState<Sauce[]>([]);
 
-  const addToCart = useCallback((product: Product, variantLabel = '', variantPrice?: number) => {
+  useEffect(() => {
+    if (!siteId) { setSauces([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('sauces')
+        .select('*')
+        .eq('site_id', siteId)
+        .eq('is_active', true)
+        .order('sort_order')
+        .order('name');
+      if (!cancelled && data) setSauces(data as Sauce[]);
+    })();
+    return () => { cancelled = true; };
+  }, [siteId]);
+
+  useRealtimeTable<Sauce>({
+    table: 'sauces',
+    siteId,
+    onInsert: (row) => { if (row.is_active) setSauces(s => s.some(x => x.id === row.id) ? s : [...s, row]); },
+    onUpdate: (row) => setSauces(s => row.is_active ? (s.some(x => x.id === row.id) ? s.map(x => x.id === row.id ? row : x) : [...s, row]) : s.filter(x => x.id !== row.id)),
+    onDelete: (row) => setSauces(s => s.filter(x => x.id !== row.id)),
+  });
+
+  const addToCart = useCallback((product: Product, variantLabel = '', variantPrice?: number, saucesForItem: SelectedSauce[] = []) => {
+    const unitPrice = variantPrice ?? product.price;
+    const sauceKey = [...saucesForItem].map(s => s.id).sort().join(',');
     setCart(prev => {
       const existing = prev.find(
-        i => i.product.id === product.id && i.variant_label === variantLabel
+        i => i.product.id === product.id
+          && i.variant_label === variantLabel
+          && [...i.sauces].map(s => s.id).sort().join(',') === sauceKey
       );
       if (existing) {
         return prev.map(i =>
@@ -80,7 +111,8 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
         quantity: 1,
         variant_label: variantLabel,
         kitchen_note: '',
-        unit_price: variantPrice ?? product.price,
+        unit_price: unitPrice,
+        sauces: saucesForItem,
       }];
     });
   }, []);
@@ -157,6 +189,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       subtotal: i.unit_price * i.quantity,
       variant_label: i.variant_label,
       kitchen_note: i.kitchen_note,
+      sauces: i.sauces ?? [],
     }));
 
     const { data: itemsData } = await supabase
@@ -217,6 +250,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       subtotal: i.unit_price * i.quantity,
       variant_label: i.variant_label,
       kitchen_note: i.kitchen_note,
+      sauces: i.sauces ?? [],
     }));
 
     const { data: itemsData } = await supabase
@@ -260,6 +294,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       variant_label: si.variant_label,
       kitchen_note: si.kitchen_note,
       unit_price: si.unit_price,
+      sauces: Array.isArray(si.sauces) ? (si.sauces as SelectedSauce[]) : [],
     }));
 
     setCart(newCart);
@@ -301,6 +336,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       selectedCustomer, setSelectedCustomer,
       orderNotes, setOrderNotes,
       discountAmount, setDiscountAmount,
+      sauces,
       addToCart, removeFromCart, updateQuantity, updateKitchenNote, clearCart,
       subtotal, taxAmount, total, itemCount,
       completeSale, deferSale, loadPendingSale, cancelSale, isPendingResume, currentSale, currentSaleItems, lastPayments,

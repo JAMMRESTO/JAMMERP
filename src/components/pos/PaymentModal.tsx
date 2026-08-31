@@ -73,9 +73,15 @@ function printDeferredTicket(
 
   const colHeaderHtml = `<div class="col-header"><span class="qty">Qté</span><span class="desc">Désignation</span><span class="pu">P.U.</span><span class="ttl">Total</span></div>`;
 
-  const itemsHtml = items.map(item =>
-    `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>`
-  ).join('');
+  const itemsHtml = items.map(item => {
+    const variant = item.variant_label
+      ? `<div style="font-size:10px;padding-left:24px;">[${esc(item.variant_label)}]</div>`
+      : '';
+    const saucesLine = item.sauces && Array.isArray(item.sauces) && item.sauces.length > 0
+      ? `<div style="font-size:11px;padding-left:24px;font-weight:700;">&#8627; Sauces : ${esc((item.sauces as { name: string }[]).map(s => s.name).join(', '))}</div>`
+      : '';
+    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}${saucesLine}`;
+  }).join('');
 
   const totalsHtml = [
     `<hr class="sep">`,

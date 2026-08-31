@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, ChevronDown, X } from 'lucide-react';
-import type { Product, ProductVariant } from '../../types/database';
+import { AlertCircle, ChevronDown, X, Utensils, Check } from 'lucide-react';
+import type { Product, ProductVariant, Sauce, SelectedSauce } from '../../types/database';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 
@@ -94,27 +94,185 @@ function VariantModal({ product, onSelect, onClose, sym }: VariantModalProps) {
   );
 }
 
+interface SauceModalProps {
+  product: Product;
+  sauces: Sauce[];
+  required: boolean;
+  maxCount: number;
+  onConfirm: (sauces: SelectedSauce[]) => void;
+  onClose: () => void;
+}
+
+function SauceModal({ product, sauces, required, maxCount, onConfirm, onClose }: SauceModalProps) {
+  const [selected, setSelected] = useState<Sauce[]>([]);
+
+  function toggle(sauce: Sauce) {
+    setSelected(prev => {
+      if (prev.some(s => s.id === sauce.id)) {
+        return prev.filter(s => s.id !== sauce.id);
+      }
+      if (prev.length >= maxCount) {
+        if (maxCount === 1) return [sauce];
+        return prev;
+      }
+      return [...prev, sauce];
+    });
+  }
+
+  function handleConfirm() {
+    const payload: SelectedSauce[] = selected.map(s => ({
+      id: s.id, name: s.name, price_supplement: s.price_supplement || 0,
+    }));
+    onConfirm(payload);
+  }
+
+  const canConfirm = required ? selected.length > 0 : true;
+  const helper = required
+    ? maxCount === 1 ? 'Choisissez 1 sauce' : `Choisissez ${maxCount} sauce${maxCount > 1 ? 's' : ''}`
+    : maxCount === 1 ? 'Choisissez au plus 1 sauce (facultatif)' : `Choisissez au plus ${maxCount} sauces (facultatif)`;
+
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        key="sauce-backdrop"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4"
+        onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <motion.div
+          key="sauce-panel"
+          initial={{ y: 32, opacity: 0, scale: 0.97 }}
+          animate={{ y: 0, opacity: 1, scale: 1 }}
+          exit={{ y: 32, opacity: 0, scale: 0.97 }}
+          transition={{ type: 'spring', damping: 26, stiffness: 320 }}
+          className="w-full max-w-sm bg-gray-900 border border-white/12 rounded-3xl shadow-2xl overflow-hidden"
+        >
+          <div className="flex items-start justify-between p-5 pb-4 border-b border-white/8">
+            <div className="flex gap-3 items-center min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center flex-shrink-0">
+                <Utensils size={16} className="text-amber-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white font-bold text-base leading-tight truncate">{product.name}</p>
+                <p className="text-white/40 text-xs mt-0.5">{helper}</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="flex-shrink-0 w-8 h-8 rounded-xl bg-white/8 hover:bg-white/14 flex items-center justify-center text-white/40 hover:text-white transition-all ml-2"
+            >
+              <X size={15} />
+            </button>
+          </div>
+
+          <div className="p-5 pt-4 max-h-[55vh] overflow-y-auto">
+            <div className="flex flex-col gap-2">
+              {sauces.length === 0 ? (
+                <p className="text-white/40 text-sm text-center py-6">Aucune sauce disponible</p>
+              ) : sauces.map(s => {
+                const isSelected = selected.some(x => x.id === s.id);
+                const disabled = !isSelected && selected.length >= maxCount && maxCount > 1;
+                return (
+                  <motion.button
+                    key={s.id}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => toggle(s)}
+                    disabled={disabled}
+                    className={`w-full px-4 py-3 rounded-2xl border text-left transition-all flex items-center justify-between gap-3
+                      ${isSelected
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-100'
+                        : disabled
+                          ? 'bg-white/2 border-white/5 text-white/25'
+                          : 'bg-white/5 hover:bg-amber-500/10 border-white/10 hover:border-amber-500/30 text-white'}`}
+                  >
+                    <span className="text-sm font-medium truncate">{s.name}</span>
+                    <span className="flex items-center gap-2 flex-shrink-0">
+                      <span className={`w-5 h-5 rounded-md border flex items-center justify-center ${isSelected ? 'bg-amber-500 border-amber-500' : 'border-white/20'}`}>
+                        {isSelected && <Check size={13} className="text-gray-900" strokeWidth={3} />}
+                      </span>
+                    </span>
+                  </motion.button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="p-5 pt-0 flex gap-2">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-2xl bg-white/4 hover:bg-white/8 text-white/50 hover:text-white/80 text-sm transition-all"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={!canConfirm}
+              className="flex-1 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-30 disabled:cursor-not-allowed text-gray-900 text-sm font-semibold transition-all"
+            >
+              Valider {selected.length > 0 && `(${selected.length})`}
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>,
+    document.body
+  );
+}
+
 interface ProductCardProps {
   product: Product;
 }
 
 function ProductCard({ product }: ProductCardProps) {
-  const { addToCart } = usePOS();
+  const { addToCart, sauces: allSauces } = usePOS();
   const { settings } = useSettings();
   const [showVariants, setShowVariants] = useState(false);
+  const [pendingVariant, setPendingVariant] = useState<{ label: string; price?: number } | null>(null);
+  const [showSauces, setShowSauces] = useState(false);
   const [added, setAdded] = useState(false);
   const hasVariants = (product.variants as ProductVariant[]).length > 0;
+  const needsSauce = settings.sauces_enabled && product.requires_sauce;
+
+  const availableSauces = needsSauce
+    ? (product.allowed_sauce_ids && product.allowed_sauce_ids.length > 0
+        ? allSauces.filter(s => product.allowed_sauce_ids.includes(s.id))
+        : allSauces)
+    : [];
 
   function handleAdd() {
     if (hasVariants) {
       setShowVariants(true);
       return;
     }
-    triggerAdd('');
+    if (needsSauce && availableSauces.length > 0) {
+      setPendingVariant({ label: '', price: undefined });
+      setShowSauces(true);
+      return;
+    }
+    finalize('', undefined, []);
   }
 
-  function triggerAdd(variant: string, price?: number) {
-    addToCart(product, variant, price);
+  function handleVariantSelect(label: string, price?: number) {
+    setShowVariants(false);
+    if (needsSauce && availableSauces.length > 0) {
+      setPendingVariant({ label, price });
+      setShowSauces(true);
+      return;
+    }
+    finalize(label, price, []);
+  }
+
+  function handleSaucesConfirm(selected: SelectedSauce[]) {
+    const v = pendingVariant ?? { label: '', price: undefined };
+    setShowSauces(false);
+    setPendingVariant(null);
+    finalize(v.label, v.price, selected);
+  }
+
+  function finalize(variant: string, price: number | undefined, saucesForItem: SelectedSauce[]) {
+    addToCart(product, variant, price, saucesForItem);
     setAdded(true);
     setTimeout(() => setAdded(false), 600);
   }
@@ -127,8 +285,18 @@ function ProductCard({ product }: ProductCardProps) {
         <VariantModal
           product={product}
           sym={settings.currency_symbol}
-          onSelect={triggerAdd}
+          onSelect={handleVariantSelect}
           onClose={() => setShowVariants(false)}
+        />
+      )}
+      {showSauces && (
+        <SauceModal
+          product={product}
+          sauces={availableSauces}
+          required={product.sauce_required}
+          maxCount={Math.min(3, Math.max(1, product.sauce_count ?? 1))}
+          onConfirm={handleSaucesConfirm}
+          onClose={() => { setShowSauces(false); setPendingVariant(null); }}
         />
       )}
     <motion.div
@@ -170,6 +338,11 @@ function ProductCard({ product }: ProductCardProps) {
           <div className="absolute top-1 right-1 bg-gray-900/80 rounded-md px-1 py-0.5 flex items-center gap-0.5">
             <ChevronDown size={8} className="text-white/50" />
             <span className="text-white/50 text-[8px]">{(product.variants as ProductVariant[]).length}</span>
+          </div>
+        )}
+        {needsSauce && !unavailable && (
+          <div className="absolute top-1 left-1 bg-amber-500/25 border border-amber-500/40 rounded-md px-1 py-0.5 flex items-center gap-0.5" title="Choix de sauce requis">
+            <Utensils size={8} className="text-amber-200" />
           </div>
         )}
       </div>

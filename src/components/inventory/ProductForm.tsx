@@ -1,25 +1,28 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  X, Check, Image, TrendingUp, AlertTriangle, Plus, Minus, Upload, Loader2
+  X, Check, Image, TrendingUp, AlertTriangle, Plus, Minus, Upload, Loader2, Utensils
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../ui/Toast';
 import { useTenant } from '../../context/TenantContext';
-import type { Product, Category, ProductVariant } from '../../types/database';
+import { useSettings } from '../../context/SettingsContext';
+import type { Product, Category, ProductVariant, Sauce } from '../../types/database';
 
 const UNITS = ['pièce', 'kg', 'g', 'litre', 'cl', 'ml', 'portion', 'boîte', 'sachet', 'lot'];
 
 interface ProductFormProps {
   product?: Product | null;
   categories: Category[];
+  sauces?: Sauce[];
   onSave: () => void;
   onCancel: () => void;
 }
 
-export function ProductForm({ product, categories, onSave, onCancel }: ProductFormProps) {
+export function ProductForm({ product, categories, sauces = [], onSave, onCancel }: ProductFormProps) {
   const toast = useToast();
   const { currentSite } = useTenant();
+  const { settings } = useSettings();
   const siteId = currentSite?.id ?? null;
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -43,6 +46,10 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
       unit: product?.unit ?? 'pièce',
       low_stock_threshold: product?.low_stock_threshold ?? 5,
       variants: (product?.variants as ProductVariant[]) ?? [],
+      requires_sauce: product?.requires_sauce ?? false,
+      sauce_required: product?.sauce_required ?? false,
+      sauce_count: Math.min(3, Math.max(1, product?.sauce_count ?? 1)),
+      allowed_sauce_ids: (product?.allowed_sauce_ids as string[]) ?? [],
     };
   });
 
@@ -82,6 +89,15 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
     setForm(f => ({
       ...f,
       variants: f.variants.map((v, idx) => idx === i ? { ...v, price } : v),
+    }));
+  }
+
+  function toggleAllowedSauce(id: string) {
+    setForm(prev => ({
+      ...prev,
+      allowed_sauce_ids: prev.allowed_sauce_ids.includes(id)
+        ? prev.allowed_sauce_ids.filter(x => x !== id)
+        : [...prev.allowed_sauce_ids, id],
     }));
   }
 
@@ -310,6 +326,101 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                 </div>
               )}
             </div>
+
+            {settings.sauces_enabled && (
+              <div className="bg-white/3 rounded-2xl border border-white/8 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Utensils size={14} className="text-white/40" />
+                    <h4 className="text-white/60 text-xs font-semibold uppercase tracking-wider">Sauces</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => f('requires_sauce', !form.requires_sauce)}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${form.requires_sauce ? 'bg-emerald-600' : 'bg-white/10'}`}
+                  >
+                    <motion.div
+                      animate={{ x: form.requires_sauce ? 16 : 2 }}
+                      transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+                      className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
+                    />
+                  </button>
+                </div>
+
+                {form.requires_sauce && (
+                  <>
+                    <p className="text-white/40 text-xs">
+                      L'écran de caisse ouvrira le choix des sauces après sélection de ce produit.
+                    </p>
+
+                    <div>
+                      <label className="text-white/60 text-xs font-medium block mb-1.5">Mode</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => f('sauce_required', true)}
+                          className={`px-3 py-2 rounded-xl border text-xs transition-all ${form.sauce_required ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80'}`}
+                        >
+                          Obligatoire
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => f('sauce_required', false)}
+                          className={`px-3 py-2 rounded-xl border text-xs transition-all ${!form.sauce_required ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80'}`}
+                        >
+                          Facultative
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-white/60 text-xs font-medium block mb-1.5">Nombre de sauces</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[1, 2, 3].map(n => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => f('sauce_count', n)}
+                            className={`px-3 py-2 rounded-xl border text-xs font-medium transition-all ${form.sauce_count === n ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80'}`}
+                          >
+                            {n === 1 ? '1 sauce' : `${n} sauces`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-white/60 text-xs font-medium block mb-1.5">
+                        Sauces autorisées <span className="text-white/30">({form.allowed_sauce_ids.length === 0 ? 'toutes' : `${form.allowed_sauce_ids.length} sélection${form.allowed_sauce_ids.length > 1 ? 's' : ''}`})</span>
+                      </label>
+                      {sauces.filter(s => s.is_active).length === 0 ? (
+                        <p className="text-white/40 text-xs p-3 rounded-xl bg-white/3 border border-white/8">
+                          Aucune sauce active. Créez d'abord des sauces via "Gérer les sauces".
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {sauces.filter(s => s.is_active).map(s => {
+                            const selected = form.allowed_sauce_ids.length === 0 || form.allowed_sauce_ids.includes(s.id);
+                            const explicitlySelected = form.allowed_sauce_ids.includes(s.id);
+                            return (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => toggleAllowedSauce(s.id)}
+                                className={`px-3 py-1.5 rounded-xl border text-xs transition-all ${explicitlySelected ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : selected ? 'bg-white/5 border-white/10 text-white/60' : 'bg-white/3 border-white/5 text-white/30'}`}
+                              >
+                                {s.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <p className="text-white/25 text-[10px] mt-1.5">Aucune sélection = toutes les sauces actives seront proposées.</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Right column */}

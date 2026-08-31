@@ -248,6 +248,7 @@ export interface SaleReceiptData {
     unit_price: number;
     subtotal: number;
     variant_label?: string | null;
+    sauces?: { name: string; price_supplement?: number }[] | null;
   }[];
   payments: { method: string; amount: number }[];
   subtotal: number;
@@ -269,8 +270,8 @@ export interface SaleReceiptSettings {
   receipt_footer?: string;
 }
 
-/** Build a full thermal sale receipt HTML document that auto-prints on load */
-export function buildSaleReceiptHtml(
+/** Build only the inner body (no <html>/<body>/<script>) of a thermal sale receipt. */
+export function buildSaleReceiptBody(
   data: SaleReceiptData,
   settings: SaleReceiptSettings
 ): string {
@@ -306,7 +307,10 @@ export function buildSaleReceiptHtml(
     const variant = item.variant_label
       ? `<div style="font-size:10px;padding-left:24px;">[${esc(item.variant_label)}]</div>`
       : '';
-    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}`;
+    const saucesLine = item.sauces && item.sauces.length > 0
+      ? `<div style="font-size:11px;padding-left:24px;font-weight:700;">&#8627; Sauces : ${esc(item.sauces.map(s => s.name).join(', '))}</div>`
+      : '';
+    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}${saucesLine}`;
   }).join('');
 
   const totalsHtml = [
@@ -331,23 +335,137 @@ export function buildSaleReceiptHtml(
     `<hr class="sep">`,
   ].join('\n');
 
+  return `${headerHtml}\n${metaHtml}\n${colHeaderHtml}\n${itemsHtml}\n${totalsHtml}\n${paymentsHtml}\n${footerHtml}`;
+}
+
+export interface KitchenTicketData {
+  createdAt: string;
+  saleType: string;
+  tableNumber?: string | number | null;
+  cashierName?: string | null;
+  customerName?: string | null;
+  orderNotes?: string;
+  items: {
+    quantity: number;
+    product_name: string;
+    variant_label?: string | null;
+    sauces?: { name: string }[] | null;
+    kitchen_note?: string | null;
+  }[];
+}
+
+export type KitchenTicketSettings = Pick<
+  SaleReceiptSettings,
+  'restaurant_name' | 'legal_form' | 'capital' | 'address' | 'phone' | 'vat_number' | 'siret'
+>;
+
+const saleTypeKitchenLabels: Record<string, string> = {
+  dine_in: 'SUR PLACE',
+  takeaway: 'À EMPORTER',
+  delivery: 'VENTE DIRECTE',
+};
+
+/** Build only the inner body of a kitchen preparation ticket. */
+export function buildKitchenTicketBody(
+  data: KitchenTicketData,
+  settings: KitchenTicketSettings
+): string {
+  const dateObj = new Date(data.createdAt);
+  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const row = (left: string, right: string) =>
+    `<div class="row"><span class="lbl">${esc(left)}</span><span class="val">${esc(right)}</span></div>`;
+
+  const headerHtml = buildThermalHeader(settings);
+
+  const metaHtml = [
+    `<div class="banner">TICKET CUISINE</div>`,
+    row(`Date : ${dateStr}`, `Heure : ${timeStr}`),
+    row('Caissier :', data.cashierName ?? 'N/A'),
+    row('Type :', saleTypeKitchenLabels[data.saleType] ?? data.saleType),
+    ...(data.saleType === 'dine_in' && data.tableNumber ? [row('Table :', String(data.tableNumber))] : []),
+    ...(data.saleType !== 'dine_in' && data.customerName ? [row('Client :', data.customerName)] : []),
+    `<hr class="sep-solid">`,
+  ].join('\n');
+
+  const itemsHtml = data.items.map(item => {
+    const variant = item.variant_label
+      ? `<div style="font-size:11px;padding-left:28px;font-weight:700;">[${esc(item.variant_label)}]</div>`
+      : '';
+    const saucesLine = item.sauces && item.sauces.length > 0
+      ? `<div style="font-size:13px;padding-left:28px;font-weight:700;">&#8627; Sauces : ${esc(item.sauces.map(s => s.name).join(', '))}</div>`
+      : '';
+    const note = item.kitchen_note
+      ? `<div style="font-size:11px;padding-left:28px;font-style:italic;">&gt;&gt; ${esc(item.kitchen_note)}</div>`
+      : '';
+    return `<div class="item-row" style="font-size:14px;">
+        <span class="qty" style="font-size:15px;">${item.quantity}x</span>
+        <span class="desc" style="font-size:14px;white-space:normal;">${esc(item.product_name)}</span>
+      </div>${variant}${saucesLine}${note}`;
+  }).join('');
+
+  const notesHtml = data.orderNotes && data.orderNotes.trim()
+    ? [
+        `<hr class="sep">`,
+        `<div class="section-title">NOTE COMMANDE</div>`,
+        `<div style="font-size:12px;font-weight:700;">${esc(data.orderNotes)}</div>`,
+      ].join('\n')
+    : '';
+
+  const footerHtml = [
+    `<hr class="sep-solid">`,
+    `<div class="footer">Ticket de préparation cuisine</div>`,
+    `<div class="footer">${esc(dateStr)} · ${esc(timeStr)}</div>`,
+  ].join('\n');
+
+  return `${headerHtml}\n${metaHtml}\n${itemsHtml}\n${notesHtml}\n${footerHtml}`;
+}
+
+function wrapThermalDoc(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="color-scheme" content="only light">
-  <title>Ticket #${esc(data.saleNumber)}</title>
+  <title>${esc(title)}</title>
   <style>${THERMAL_CSS}</style>
 </head>
 <body>
-  ${headerHtml}
-  ${metaHtml}
-  ${colHeaderHtml}
-  ${itemsHtml}
-  ${totalsHtml}
-  ${paymentsHtml}
-  ${footerHtml}
-  <script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
+${body}
+<script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
 </body>
 </html>`;
+}
+
+export function buildKitchenTicketHtml(
+  data: KitchenTicketData,
+  settings: KitchenTicketSettings
+): string {
+  return wrapThermalDoc('Ticket cuisine', buildKitchenTicketBody(data, settings));
+}
+
+/** Full thermal sale receipt HTML document that auto-prints on load. */
+export function buildSaleReceiptHtml(
+  data: SaleReceiptData,
+  settings: SaleReceiptSettings
+): string {
+  return wrapThermalDoc(`Ticket #${data.saleNumber}`, buildSaleReceiptBody(data, settings));
+}
+
+/**
+ * Combined kitchen ticket + sale receipt in one print job.
+ * The two tickets are separated by a page-break so a thermal printer cuts between them.
+ */
+export function buildCombinedKitchenAndReceiptHtml(
+  kitchen: KitchenTicketData,
+  receipt: SaleReceiptData,
+  settings: SaleReceiptSettings
+): string {
+  const kitchenBody = buildKitchenTicketBody(kitchen, settings);
+  const receiptBody = buildSaleReceiptBody(receipt, settings);
+  const combined = `${kitchenBody}
+<div style="page-break-before: always; height: 0; margin: 0; padding: 0;"></div>
+${receiptBody}`;
+  return wrapThermalDoc(`Ticket #${receipt.saleNumber}`, combined);
 }

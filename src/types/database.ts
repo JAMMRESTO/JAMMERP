@@ -137,8 +137,29 @@ export interface Product {
   unit: string;
   low_stock_threshold: number;
   variants: ProductVariant[];
+  requires_sauce: boolean;
+  sauce_required: boolean;
+  sauce_count: number;
+  allowed_sauce_ids: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface Sauce {
+  id: string;
+  site_id: string | null;
+  name: string;
+  price_supplement: number;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SelectedSauce {
+  id: string;
+  name: string;
+  price_supplement: number;
 }
 
 export type StockMovementType = 'in' | 'out' | 'adjustment';
@@ -204,6 +225,7 @@ export interface SaleItem {
   subtotal: number;
   variant_label: string;
   kitchen_note: string;
+  sauces: SelectedSauce[];
   created_at: string;
 }
 
@@ -372,6 +394,7 @@ export interface CartItem {
   variant_label: string;
   kitchen_note: string;
   unit_price: number;
+  sauces: SelectedSauce[];
 }
 
 // ============================================================
@@ -401,6 +424,8 @@ export interface RestaurantSettings {
   };
   receipt_footer: string;
   auto_print_receipt: boolean;
+  print_kitchen_with_receipt: boolean;
+  sauces_enabled: boolean;
   address: string;
   phone: string;
   siret: string;
@@ -755,6 +780,7 @@ export interface Database {
       sale_items: { Row: SaleItem; Insert: Omit<SaleItem, 'id' | 'created_at'>; Update: Partial<Omit<SaleItem, 'id' | 'created_at'>>; };
       payments: { Row: Payment; Insert: Omit<Payment, 'id' | 'created_at'>; Update: Partial<Omit<Payment, 'id' | 'created_at'>>; };
       stock_movements: { Row: StockMovement; Insert: Omit<StockMovement, 'id' | 'created_at'>; Update: Partial<Omit<StockMovement, 'id' | 'created_at'>>; };
+      sauces: { Row: Sauce; Insert: Omit<Sauce, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<Sauce, 'id' | 'created_at' | 'updated_at'>>; };
     };
   };
 }
