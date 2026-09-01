@@ -151,9 +151,19 @@ export function printViaIframe(html: string, frameId = '__waarwi_print_frame__')
   doc.close();
 
   iframe.onload = () => {
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
-    setTimeout(() => iframe.remove(), 1500);
+    let printed = false;
+    const triggerPrint = () => {
+      if (printed) return;
+      printed = true;
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch {
+        // ignore
+      }
+      setTimeout(() => iframe.remove(), 2000);
+    };
+    setTimeout(triggerPrint, 50);
   };
 }
 
@@ -430,7 +440,6 @@ function wrapThermalDoc(title: string, body: string): string {
 </head>
 <body>
 ${body}
-<script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
 </body>
 </html>`;
 }

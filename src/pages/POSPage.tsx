@@ -2,8 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, LogOut, Power, CreditCard, Receipt } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
-import { buildSaleReceiptHtml, buildCombinedKitchenAndReceiptHtml, printViaIframe } from '../lib/printUtils';
-import { printCombined, printReceipt, printKitchenTicket, isPrinterConnected, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
+import { printCombined, printReceipt, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
@@ -62,6 +61,7 @@ function POSInner() {
   const [search, setSearch] = useState('');
   const [showPayment, setShowPayment] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
+  const paymentSuccessLock = useRef(false);
   const [showCartMobile, setShowCartMobile] = useState(false);
   const [showTablePicker, setShowTablePicker] = useState(false);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
@@ -153,8 +153,11 @@ function POSInner() {
   }, [products, selectedCategoryId, search]);
 
   function handlePaymentSuccess(result: { sale: { sale_number: string; created_at: string }; items: { quantity: number; product_name: string; unit_price: number; subtotal: number; variant_label?: string | null; sauces?: { name: string; price_supplement?: number }[] | null }[]; payments: { method: string; amount: number }[] }) {
+    if (paymentSuccessLock.current) return;
+    paymentSuccessLock.current = true;
+    setTimeout(() => { paymentSuccessLock.current = false; }, 1500);
     setShowPayment(false);
-    if (settings.auto_print_receipt) {
+    if (settings.auto_print_receipt && printerConnected) {
       const receiptData: EscposReceiptData = {
         saleNumber: result.sale.sale_number,
         createdAt: result.sale.created_at,
@@ -185,38 +188,10 @@ function POSInner() {
         })),
       };
 
-      if (printerConnected) {
-        // Silent USB printing — no dialog
-        if (settings.print_kitchen_with_receipt) {
-          printCombined(kitchenData, receiptData, settings);
-        } else {
-          printReceipt(receiptData, settings);
-        }
+      if (settings.print_kitchen_with_receipt) {
+        printCombined(kitchenData, receiptData, settings);
       } else {
-        // Fallback: iframe print
-        const html = settings.print_kitchen_with_receipt
-          ? buildCombinedKitchenAndReceiptHtml(
-              {
-                createdAt: result.sale.created_at,
-                saleType,
-                tableNumber,
-                cashierName: currentUser?.name ?? null,
-                customerName: selectedCustomer ? selectedCustomer.name : customerName,
-                orderNotes,
-                items: cart.map(item => ({
-                  quantity: item.quantity,
-                  product_name: item.product.name,
-                  variant_label: item.variant_label,
-                  sauces: item.sauces,
-                  flavors: item.flavors,
-                  kitchen_note: item.kitchen_note,
-                })),
-              },
-              receiptData,
-              settings
-            )
-          : buildSaleReceiptHtml(receiptData, settings);
-        printViaIframe(html);
+        printReceipt(receiptData, settings);
       }
       clearCart();
       setShowCartMobile(false);

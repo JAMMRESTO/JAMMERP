@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Store, DollarSign, Palette, Puzzle, Receipt, Save, Check, Users, Phone, MapPin, FileText, Building2, LayoutDashboard, Upload, X, ShoppingCart, Copy, Lock, Eye, EyeOff, Shield, Printer, Usb, type LucideIcon
+  Store, DollarSign, Palette, Puzzle, Receipt, Save, Check, Users, Phone, MapPin, FileText, Building2, LayoutDashboard, Upload, X, ShoppingCart, Copy, Lock, Eye, EyeOff, Shield, Printer, Usb, HelpCircle, type LucideIcon
 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import { usePrinter } from '../context/PrinterContext';
@@ -10,6 +10,7 @@ import { UserManagement } from '../components/auth/UserManagement';
 import { SiteManagersPanel } from '../components/auth/SiteManagersPanel';
 import { useTenant } from '../context/TenantContext';
 import { supabase } from '../lib/supabase';
+import { printTestTicket } from '../lib/escpos';
 
 type TabId = 'general' | 'financial' | 'appearance' | 'modules' | 'users' | 'managers';
 
@@ -291,21 +292,33 @@ function OwnerPinCard() {
 }
 
 function PrinterConnectionCard() {
-  const { supported, connected, connect, disconnect } = usePrinter();
+  const { supported, connected, lastError, connect, disconnect } = usePrinter();
+  const { settings } = useSettings();
   const toast = useToast();
   const [connecting, setConnecting] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [helpMode, setHelpMode] = useState<'install' | 'restore'>('install');
 
   async function handleConnect() {
     setConnecting(true);
     const ok = await connect();
     setConnecting(false);
     if (ok) toast('success', 'Imprimante connectée');
-    else toast('error', 'Connexion échouée — vérifiez que l\'imprimante est branchée en USB');
+    else toast('error', lastError ?? 'Connexion échouée — vérifiez que l\'imprimante est branchée en USB');
   }
 
   async function handleDisconnect() {
     await disconnect();
     toast('success', 'Imprimante déconnectée');
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    const ok = await printTestTicket(settings.restaurant_name);
+    setTesting(false);
+    if (ok) toast('success', 'Ticket de test envoyé — vérifiez que le papier est coupé');
+    else toast('error', 'Échec de l\'impression test — reconnectez l\'imprimante');
   }
 
   return (
@@ -363,6 +376,132 @@ function PrinterConnectionCard() {
               </button>
             )}
           </div>
+
+          {/* Error message */}
+          {!connected && lastError && (
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-red-500/8 border border-red-500/20">
+              <HelpCircle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-red-300 text-sm font-medium">Connexion échouée</p>
+                <p className="text-red-400/70 text-xs mt-1">{lastError}</p>
+                <button
+                  onClick={() => setShowHelp(v => !v)}
+                  className="text-red-400 text-xs underline mt-2 hover:text-red-300"
+                >
+                  {showHelp ? 'Masquer l\'aide' : 'Voir l\'aide et les options'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Test print */}
+          {connected && (
+            <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white/3 border border-white/8">
+              <p className="text-white/50 text-xs">
+                Envoyez un court ticket de test pour vérifier l'impression et la découpe.
+              </p>
+              <button
+                onClick={handleTest}
+                disabled={testing}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/8 hover:bg-white/14 border border-white/10 text-white text-xs font-medium transition-all flex-shrink-0 disabled:opacity-50"
+              >
+                {testing ? (
+                  <div className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                ) : (
+                  <Printer size={13} />
+                )}
+                {testing ? 'Envoi...' : 'Ticket de test'}
+              </button>
+            </div>
+          )}
+
+          {/* Help / setup guide */}
+          {(showHelp || (!connected && !lastError)) && (
+            <div className="rounded-xl bg-white/3 border border-white/8 p-4 space-y-3">
+              {/* Mode toggle */}
+              <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/8">
+                <button
+                  onClick={() => setHelpMode('install')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${helpMode === 'install' ? 'bg-cyan-600 text-white' : 'text-white/40 hover:text-white/70'}`}
+                >
+                  Activer la caisse (WinUSB)
+                </button>
+                <button
+                  onClick={() => setHelpMode('restore')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${helpMode === 'restore' ? 'bg-amber-600 text-white' : 'text-white/40 hover:text-white/70'}`}
+                >
+                  Restaurer le pilote Windows
+                </button>
+              </div>
+
+              {helpMode === 'install' ? (
+                <>
+                  <p className="text-white/70 text-sm font-medium">Configurer l'imprimante sur Windows 10</p>
+                  <ol className="space-y-2 text-white/50 text-xs leading-relaxed list-decimal pl-4">
+                    <li>Fermez l'application de caisse.</li>
+                    <li>
+                      Téléchargez l'outil gratuit <span className="text-white/70 font-medium">Zadig</span> (site officiel : zadig.akeo.ie).
+                    </li>
+                    <li>
+                      Dans Zadig, menu <span className="text-white/70 font-medium">Options → List All Devices</span>,
+                      sélectionnez votre imprimante <span className="text-white/70 font-medium">TM-T20X</span> dans la liste.
+                    </li>
+                    <li>
+                      Dans le champ pilote, choisissez <span className="text-white/70 font-medium">WinUSB</span>
+                      (ou <span className="text-white/70 font-medium">libusb</span>), puis cliquez sur
+                      <span className="text-white/70 font-medium"> Replace Driver</span>.
+                    </li>
+                    <li>
+                      Rouvrez l'application de caisse, cliquez sur <span className="text-white/70 font-medium">Connecter</span>
+                      et re-sélectionnez <span className="text-white/70 font-medium">TM-T20X</span> dans la fenêtre du navigateur.
+                    </li>
+                  </ol>
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/8 border border-amber-500/15">
+                    <p className="text-amber-400/70 text-[11px] leading-relaxed">
+                      Attention : après cette manipulation, l'imprimante ne sera plus accessible depuis Word ou d'autres logiciels Windows. C'est normal — la caisse communique directement avec l'imprimante, sans passer par le pilote Windows.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-white/70 text-sm font-medium">Restaurer le pilote Windows d'origine</p>
+                  <p className="text-white/40 text-xs leading-relaxed">
+                    Si vous n'utilisez plus la caisse, ou si l'imprimante est bloquée et ne répond plus, restaurez le pilote Windows d'origine. L'imprimante redeviendra accessible depuis Word et les autres logiciels Windows.
+                  </p>
+                  <ol className="space-y-2 text-white/50 text-xs leading-relaxed list-decimal pl-4">
+                    <li>
+                      Déconnectez l'imprimante depuis le bouton <span className="text-white/70 font-medium">Déconnecter</span> ci-dessus, puis fermez l'application de caisse.
+                    </li>
+                    <li>
+                      Ouvrez le <span className="text-white/70 font-medium">Gestionnaire de périphériques</span> de Windows
+                      (clic droit sur le menu Démarrer → <span className="text-white/70 font-medium">Gestionnaire de périphériques</span>).
+                    </li>
+                    <li>
+                      Cherchez l'imprimante <span className="text-white/70 font-medium">TM-T20X</span> — elle apparaît souvent sous
+                      <span className="text-white/70 font-medium"> Périphériques USB</span> (pas sous « Imprimantes ») quand le pilote WinUSB est actif.
+                    </li>
+                    <li>
+                      Clic droit sur <span className="text-white/70 font-medium">TM-T20X</span> →
+                      <span className="text-white/70 font-medium"> Désinstaller l'appareil</span>.
+                      Cochez <span className="text-white/70 font-medium">« Supprimer le logiciel de pilote pour cet appareil »</span> si la case est proposée, puis confirmez.
+                    </li>
+                    <li>
+                      Débranchez puis rebranchez le câble USB de l'imprimante. Windows réinstalle automatiquement son pilote d'imprimante d'origine.
+                    </li>
+                    <li>
+                      Si Windows ne réinstalle pas le pilote automatiquement, téléchargez et installez le pilote officiel Epson TM-T20X depuis le site d'Epson
+                      (epson.com → support → TM-T20X → pilote Windows).
+                    </li>
+                  </ol>
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/8 border border-amber-500/15">
+                    <p className="text-amber-400/70 text-[11px] leading-relaxed">
+                      Après cette manipulation, l'impression depuis la caisse en USB direct ne fonctionnera plus tant que vous ne refaites pas la procédure « Activer la caisse (WinUSB) ». L'imprimante redevient utilisable depuis Word et les autres logiciels Windows.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

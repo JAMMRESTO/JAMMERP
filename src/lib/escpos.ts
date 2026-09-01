@@ -11,7 +11,9 @@ const LF = 0x0a;
 
 const INIT = new Uint8Array([ESC, 0x40]);
 const FEED = (n: number) => new Uint8Array([ESC, 0x64, n]);
-const CUT = new Uint8Array([GS, 0x56, 0x01]); // partial cut
+// Full cut (GS V 0) — supported by all Epson TM-series. Partial cut (GS V 1)
+// is silently ignored by many models, so we default to full cut.
+const CUT = new Uint8Array([GS, 0x56, 0x00]);
 const FULL_CUT = new Uint8Array([GS, 0x56, 0x00]);
 
 // Text styles
@@ -45,11 +47,10 @@ function concat(...arrays: Uint8Array[]): Uint8Array {
 
 // ─── WebUSB printer connection ───
 
-// Common Epson USB vendor IDs
-const EPSON_VENDOR_IDS = new Set([
-  0x04b8, // Epson
-  0x0519, // Some Epson TM series
-]);
+export interface ConnectResult {
+  ok: boolean;
+  error?: string;
+}
 
 let connectedDevice: USBDevice | null = null;
 let connectedEndpoint: number = 1;
@@ -63,13 +64,21 @@ export function isPrinterConnected(): boolean {
   return connectedDevice !== null;
 }
 
-export async function requestPrinter(): Promise<boolean> {
-  if (!isWebUSBSupported()) return false;
+function classifyError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/not found|no device|cancelled|aborted/i.test(msg)) return 'Aucune imprimante sélectionnée';
+  if (/access|denied|busy|claim/i.test(msg)) return 'L\'imprimante est déjà utilisée par le pilote Windows';
+  if (/configuration|interface/i.test(msg)) return 'Impossible d\'accéder au port d\'impression de l\'imprimante';
+  return msg || 'Erreur inconnue';
+}
+
+export async function requestPrinter(): Promise<ConnectResult> {
+  if (!isWebUSBSupported()) return { ok: false, error: 'WebUSB non supporté par ce navigateur' };
   try {
     const device = await navigator.usb.requestDevice({ filters: [] });
     return await openDevice(device);
-  } catch {
-    return false;
+  } catch (err) {
+    return { ok: false, error: classifyError(err) };
   }
 }
 
@@ -78,7 +87,8 @@ export async function reconnectPrinter(): Promise<boolean> {
   try {
     const devices = await navigator.usb.getDevices();
     for (const device of devices) {
-      if (await openDevice(device)) return true;
+      const r = await openDevice(device);
+      if (r.ok) return true;
     }
   } catch {
     // ignore
@@ -86,42 +96,48 @@ export async function reconnectPrinter(): Promise<boolean> {
   return false;
 }
 
-async function openDevice(device: USBDevice): Promise<boolean> {
+async function openDevice(device: USBDevice): Promise<ConnectResult> {
   try {
-    await device.open();
-    // Find a suitable interface
-    const config = device.configuration;
-    if (!config) {
-      await device.selectConfiguration(1);
-    }
-    const iface = config?.interfaces?.[0] ?? device.configuration?.interfaces?.[0];
-    if (!iface) return false;
+    if (!device.opened) await device.open();
 
-    const alt = iface.alternates[0];
-    connectedInterface = iface.interfaceNumber;
-    await device.claimInterface(connectedInterface);
-
-    // Find bulk OUT endpoint
-    let outEndpoint = 1;
-    if (alt?.endpoints) {
-      const outEp = alt.endpoints.find(e => e.direction === 'out');
-      if (outEp) outEndpoint = outEp.endpointNumber;
+    // Try every configuration the device exposes
+    const configs = device.configurations.length > 0 ? device.configurations : [null];
+    for (const cfg of configs) {
+      if (cfg && (!device.configuration || device.configuration.configurationValue !== cfg.configurationValue)) {
+        try { await device.selectConfiguration(cfg.configurationValue); } catch { /* keep trying */ }
+      }
+      const activeConfig = device.configuration ?? cfg;
+      const interfaces = activeConfig?.interfaces ?? [];
+      for (const iface of interfaces) {
+        for (const alt of iface.alternates) {
+          const outEp = alt.endpoints?.find(e => e.direction === 'out');
+          if (!outEp) continue;
+          try {
+            await device.claimInterface(iface.interfaceNumber);
+            connectedInterface = iface.interfaceNumber;
+            connectedEndpoint = outEp.endpointNumber;
+            connectedDevice = device;
+            return { ok: true };
+          } catch {
+            // interface may be claimed by another driver — try the next
+          }
+        }
+      }
     }
-    connectedEndpoint = outEndpoint;
-    connectedDevice = device;
-    return true;
-  } catch {
-    return false;
+    return { ok: false, error: 'Aucun canal d\'écriture trouvé. Le pilote Windows occupe peut-être l\'imprimante.' };
+  } catch (err) {
+    return { ok: false, error: classifyError(err) };
   }
 }
 
 export async function disconnectPrinter(): Promise<void> {
   if (connectedDevice) {
     try {
+      await connectedDevice.releaseInterface(connectedInterface);
+    } catch { /* ignore */ }
+    try {
       await connectedDevice.close();
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
     connectedDevice = null;
   }
 }
@@ -139,6 +155,30 @@ async function sendBytes(data: Uint8Array): Promise<boolean> {
     connectedDevice = null;
     return false;
   }
+}
+
+// ─── Test ticket ───
+
+export async function printTestTicket(restaurantName: string): Promise<boolean> {
+  const parts: Uint8Array[] = [
+    INIT,
+    CENTER,
+    BOLD_ON,
+    LARGE_ON,
+    line(restaurantName.toUpperCase() || 'TEST IMPRESSION'),
+    LARGE_OFF,
+    BOLD_OFF,
+    LEFT,
+    dashedLine(),
+    line('Ticket de test'),
+    line(new Date().toLocaleString('fr-FR')),
+    line('Si vous lisez ce texte,'),
+    line('l\'imprimante fonctionne.'),
+    dashedLine(),
+    FEED(5),
+    CUT,
+  ];
+  return sendBytes(concat(...parts));
 }
 
 // ─── Line / text builders ───
@@ -235,7 +275,7 @@ export function buildKitchenTicketBytes(data: EscposKitchenData): Uint8Array {
     parts.push(dashedLine(), BOLD_ON, line('NOTE:'), line(data.orderNotes), BOLD_OFF);
   }
 
-  parts.push(FEED(3), CUT);
+  parts.push(FEED(5), CUT);
   return concat(...parts);
 }
 
@@ -368,7 +408,7 @@ export function buildReceiptBytes(
   // Footer
   parts.push(CENTER, line(settings.receipt_footer || 'Merci de votre visite!'), line('A bientot.'), LEFT);
 
-  parts.push(FEED(3), CUT);
+  parts.push(FEED(5), CUT);
   return concat(...parts);
 }
 
@@ -412,6 +452,11 @@ export async function printCombined(
   receipt: EscposReceiptData,
   settings: EscposReceiptSettings
 ): Promise<boolean> {
-  const bytes = buildCombinedBytes(kitchen, receipt, settings);
-  return sendBytes(bytes);
+  const kitchenBytes = buildKitchenTicketBytes(kitchen);
+  const receiptBytes = buildReceiptBytes(receipt, settings);
+  const ok1 = await sendBytes(kitchenBytes);
+  if (!ok1) return false;
+  // Give the printer time to execute the cut before the next job starts.
+  await new Promise(r => setTimeout(r, 700));
+  return sendBytes(receiptBytes);
 }
