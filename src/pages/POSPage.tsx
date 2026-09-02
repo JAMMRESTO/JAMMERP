@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, LogOut, Power, CreditCard, Receipt } from 'lucide-react';
+import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, LogOut, Power, CreditCard, Archive } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
-import { printCombined, printReceipt, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
+import { printCombined, printReceipt, openCashDrawer, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
@@ -18,7 +18,7 @@ import { TablePickerModal } from '../components/pos/TablePickerModal';
 import { CustomerPickerModal } from '../components/pos/CustomerPickerModal';
 import { PendingTicketsModal } from '../components/pos/PendingTicketsModal';
 import { CashClosureModal } from '../components/pos/CashClosureModal';
-import { SalesHistoryModal } from '../components/pos/SalesHistoryModal';
+import { useToast } from '../components/ui/Toast';
 import type { Category, Product, SaleType, CashSession } from '../types/database';
 
 const saleTypes: { id: SaleType; label: string; icon: typeof Utensils }[] = [
@@ -40,7 +40,22 @@ function POSInner() {
   const { currentUser, lockSession, logout } = useAuth();
   const { currentSite, authUser, isSiteManager } = useTenant();
   const { connected: printerConnected } = usePrinter();
+  const { toast } = useToast();
   const siteId = currentSite?.id ?? null;
+  const [drawerOpening, setDrawerOpening] = useState(false);
+
+  const handleOpenDrawer = useCallback(async () => {
+    if (drawerOpening) return;
+    if (!printerConnected) {
+      toast('error', 'Imprimante non connectée');
+      return;
+    }
+    setDrawerOpening(true);
+    const ok = await openCashDrawer();
+    setDrawerOpening(false);
+    if (ok) toast('success', 'Tiroir ouvert');
+    else toast('error', "Impossible d'ouvrir le tiroir");
+  }, [drawerOpening, printerConnected, toast]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -67,7 +82,6 @@ function POSInner() {
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [showPendingTickets, setShowPendingTickets] = useState(false);
   const [showCashClosure, setShowCashClosure] = useState(false);
-  const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [sessionOpenedAt, setSessionOpenedAt] = useState<string>('');
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -284,16 +298,19 @@ function POSInner() {
           )}
         </button>
 
-        {/* Sales history / cancel button */}
+        {/* Cash drawer button */}
         <button
-          onClick={() => setShowSalesHistory(true)}
-          className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-[10px] sm:text-xs font-medium transition-all flex-shrink-0
-            bg-white/4 border-white/10 text-white/50 hover:text-white/80 hover:border-white/20"
-          title="Historique / Annulations"
+          onClick={handleOpenDrawer}
+          disabled={drawerOpening}
+          className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-[10px] sm:text-xs font-medium transition-all flex-shrink-0
+            ${drawerOpening
+              ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+              : 'bg-white/4 border-white/10 text-white/50 hover:text-white/80 hover:border-white/20'}`}
+          title="Ouvrir le tiroir caisse"
         >
-          <Receipt size={12} className="sm:hidden" />
-          <Receipt size={13} className="hidden sm:block" />
-          <span className="hidden sm:inline">Ventes</span>
+          <Archive size={12} className="sm:hidden" />
+          <Archive size={13} className="hidden sm:block" />
+          <span className="hidden sm:inline">Tiroir</span>
         </button>
 
         {/* Table badge (dine_in) */}
@@ -585,11 +602,6 @@ function POSInner() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showSalesHistory && (
-          <SalesHistoryModal onClose={() => setShowSalesHistory(false)} />
-        )}
-      </AnimatePresence>
     </div>
   );
 }

@@ -178,6 +178,11 @@ async function sendBytes(data: Uint8Array): Promise<boolean> {
 
 // ─── Test ticket ───
 
+export async function openCashDrawer(): Promise<boolean> {
+  const DRAWER_KICK = new Uint8Array([ESC, 0x70, 0x00, 0x19, 0xff]);
+  return sendBytes(DRAWER_KICK);
+}
+
 export async function printTestTicket(restaurantName: string): Promise<boolean> {
   const parts: Uint8Array[] = [
     INIT,
@@ -514,4 +519,139 @@ export async function printCombined(
   // Give the printer time to execute the cut before the next job starts.
   await new Promise(r => setTimeout(r, 700));
   return sendBytes(receiptBytes);
+}
+
+// ─── X Report (cash session closure) ───
+
+export interface EscposXReportData {
+  sessionNumber: number;
+  openedAt: string;
+  closedAt: string;
+  cashierName: string;
+  salesCount: number;
+  totalSales: number;
+  byMethod: {
+    cash: number;
+    wave: number;
+    orange_money: number;
+    card: number;
+  };
+  byCategory: { name: string; count: number; total: number }[];
+  openingBalance: number;
+  expectedCash: number;
+  actualCash: number;
+  cashDifference: number;
+  notes?: string | null;
+}
+
+export interface EscposXReportSettings {
+  restaurant_name: string;
+  address: string;
+  phone: string;
+  vat_number?: string;
+  siret?: string;
+  currency_symbol: string;
+}
+
+export function buildXReportBytes(
+  data: EscposXReportData,
+  settings: EscposXReportSettings
+): Uint8Array {
+  const sym = printerSafeText(settings.currency_symbol);
+  const fmtNumber = (n: number) =>
+    printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
+  const fmtSigned = (n: number) => `${n >= 0 ? '+' : '-'}${fmtNumber(Math.abs(n))} ${sym}`;
+  const fmt = (n: number) => `${fmtNumber(n)} ${sym}`;
+
+  const openedAt = new Date(data.openedAt);
+  const closedAt = new Date(data.closedAt);
+  const fmtTime = (d: Date) =>
+    d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const fmtDate = (d: Date) =>
+    d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  const parts: Uint8Array[] = [INIT, CENTER];
+
+  parts.push(
+    BOLD_ON,
+    LARGE_ON,
+    line(settings.restaurant_name.toUpperCase()),
+    LARGE_OFF,
+    BOLD_OFF,
+  );
+  if (settings.address) parts.push(line(settings.address));
+  if (settings.phone) parts.push(line(`Tel: ${settings.phone}`));
+  if (settings.vat_number) parts.push(line(`TVA: ${settings.vat_number}`));
+  if (settings.siret) parts.push(line(`SIRET: ${settings.siret}`));
+
+  parts.push(solidLine(RECEIPT_WIDTH));
+  parts.push(BOLD_ON, DOUBLE_ON, line('X DE CAISSE'), DOUBLE_OFF, BOLD_OFF);
+  parts.push(line(`Session N ${String(data.sessionNumber).padStart(4, '0')}`));
+  parts.push(solidLine(RECEIPT_WIDTH));
+
+  parts.push(LEFT);
+  parts.push(strBytes(padLine('Date', fmtDate(openedAt))));
+  parts.push(strBytes(padLine('Ouverture', fmtTime(openedAt))));
+  parts.push(strBytes(padLine('Fermeture', fmtTime(closedAt))));
+  parts.push(strBytes(padLine('Caissier', data.cashierName)));
+  parts.push(dashedLine());
+
+  parts.push(BOLD_ON, line('ACTIVITE'), BOLD_OFF);
+  parts.push(strBytes(padLine('Nb de ventes', String(data.salesCount))));
+  parts.push(BOLD_ON, strBytes(padLine('CA Total', fmt(data.totalSales))), BOLD_OFF);
+  parts.push(dashedLine());
+
+  parts.push(BOLD_ON, line('ENCAISSEMENTS'), BOLD_OFF);
+  parts.push(strBytes(padLine('Especes', fmt(data.byMethod.cash))));
+  parts.push(strBytes(padLine('Wave', fmt(data.byMethod.wave))));
+  parts.push(strBytes(padLine('Orange Money', fmt(data.byMethod.orange_money))));
+  parts.push(strBytes(padLine('Carte', fmt(data.byMethod.card))));
+  const totalEncaisse =
+    data.byMethod.cash + data.byMethod.wave + data.byMethod.orange_money + data.byMethod.card;
+  parts.push(dashedLine());
+  parts.push(BOLD_ON, strBytes(padLine('Total encaisse', fmt(totalEncaisse))), BOLD_OFF);
+  parts.push(dashedLine());
+
+  if (data.byCategory.length > 0) {
+    parts.push(BOLD_ON, line('VENTES PAR CATEGORIE'), BOLD_OFF);
+    for (const cat of data.byCategory) {
+      parts.push(strBytes(padLine(`${cat.name} (${cat.count})`, fmt(cat.total))));
+    }
+    parts.push(dashedLine());
+  }
+
+  parts.push(BOLD_ON, line('COMPTAGE CAISSE'), BOLD_OFF);
+  parts.push(strBytes(padLine('Fonds initial', fmt(data.openingBalance))));
+  parts.push(strBytes(padLine('Especes attendues', fmt(data.expectedCash))));
+  parts.push(strBytes(padLine('Especes comptees', fmt(data.actualCash))));
+  parts.push(solidLine(RECEIPT_WIDTH));
+
+  const diff = data.cashDifference;
+  const diffLabel =
+    diff === 0 ? 'CAISSE EQUILIBREE' : diff > 0 ? 'EXCEDENT' : 'MANQUE';
+  parts.push(BOLD_ON, strBytes(padLine(diffLabel, fmtSigned(diff))), BOLD_OFF);
+  parts.push(solidLine(RECEIPT_WIDTH));
+
+  if (data.notes && data.notes.trim().length > 0) {
+    parts.push(BOLD_ON, line('NOTES'), BOLD_OFF);
+    const wrapped = wrapPrinterText(data.notes, RECEIPT_WIDTH);
+    for (const l of wrapped) parts.push(line(l));
+    parts.push(dashedLine());
+  }
+
+  parts.push(CENTER);
+  parts.push(line(`Imprime le ${new Date().toLocaleString('fr-FR')}`));
+  parts.push(line('Document a conserver'));
+  parts.push(LEFT);
+  parts.push(FEED(5), CUT);
+
+  return concat(...parts);
+}
+
+export async function printXReport(
+  data: EscposXReportData,
+  settings: EscposXReportSettings
+): Promise<boolean> {
+  const bytes = buildXReportBytes(data, settings);
+  return sendBytes(bytes);
 }

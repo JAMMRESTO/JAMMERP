@@ -10,7 +10,9 @@ import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useSettings } from '../../context/SettingsContext';
-import { esc, fmtAmt, THERMAL_CSS, buildThermalHeader, printViaIframe } from '../../lib/printUtils';
+import { usePrinter } from '../../context/PrinterContext';
+import { useToast } from '../ui/Toast';
+import { printXReport } from '../../lib/escpos';
 import type { PaymentMethod, CashSession } from '../../types/database';
 
 interface SalesSummary {
@@ -26,92 +28,52 @@ interface CashClosureModalProps {
   openedAt: string; // ISO — début de session
 }
 
-function buildXCaisseHtml(params: {
-  session: CashSession;
-  summary: SalesSummary;
-  restaurantName: string;
-  sym: string;
-  cashierName: string;
-  address: string;
-  phone: string;
-}): string {
-  const { session, summary, restaurantName, sym, cashierName, address, phone } = params;
-  const openedAt = new Date(session.opened_at);
-  const closedAt = session.closed_at ? new Date(session.closed_at) : new Date();
-  const diff = session.cash_difference;
-  const diffLabel = diff === 0 ? 'Caisse équilibrée' : diff > 0 ? 'Excédent' : 'Manque';
-  const diffSign = diff >= 0 ? '+' : '';
-  const fmt = (n: number) => fmtAmt(n, sym);
-  const fmtTime = (d: Date) => d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const fmtDate = (d: Date) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
-  const row = (lbl: string, val: string, large = false) =>
-    `<div class="row${large ? ' total-row' : ''}"><span class="lbl">${esc(lbl)}</span><span class="val">${esc(val)}</span></div>`;
-
-  const header = buildThermalHeader({ restaurant_name: restaurantName, address, phone });
-
-  return `<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="color-scheme" content="only light">
-  <title>X de Caisse — Session #${String(session.session_number).padStart(4, '0')}</title>
-  <style>${THERMAL_CSS}</style>
-</head>
-<body>
-  ${header}
-  <div class="center" style="font-size:14px;font-weight:700;margin:4px 0;">*** X DE CAISSE ***</div>
-  <div class="center" style="font-size:11px;margin-bottom:3px;">Session #${String(session.session_number).padStart(4, '0')}</div>
-  <hr class="sep">
-  ${row('Date', fmtDate(openedAt))}
-  ${row('Ouverture', fmtTime(openedAt))}
-  ${row('Fermeture', fmtTime(closedAt))}
-  ${row('Caissier', cashierName)}
-  <hr class="sep">
-  <div class="section-title">ACTIVITÉ</div>
-  ${row('Nb de ventes', String(summary.sales_count))}
-  ${row('CA Total', fmt(summary.total_sales), true)}
-  <hr class="sep">
-  <div class="section-title">ENCAISSEMENTS</div>
-  ${row('Espèces', fmt(session.total_cash))}
-  ${row('Wave', fmt(session.total_wave))}
-  ${row('Orange Money', fmt(session.total_orange_money))}
-  ${row('Carte', fmt(session.total_card))}
-  <hr class="sep">
-  ${summary.by_category.length > 0 ? `
-  <div class="section-title">VENTES PAR CATEGORIE</div>
-  ${summary.by_category.map(cat => row(`${cat.name} (${cat.count})`, fmt(cat.total))).join('\n')}
-  <hr class="sep">
-  ` : ''}
-  <div class="section-title">COMPTAGE CAISSE</div>
-  ${row('Fonds initial', fmt(session.opening_balance))}
-  ${row('Espèces attendues', fmt(session.expected_cash))}
-  ${row('Espèces comptées', fmt(session.actual_cash))}
-  <hr class="sep-solid">
-  ${row(diffLabel, `${diffSign}${fmt(diff)}`, true)}
-  ${session.notes ? `<hr class="sep"><div class="section-title">NOTES</div><div style="font-size:11px;">${esc(session.notes)}</div>` : ''}
-  <hr class="sep-solid">
-  <div class="footer">
-    Imprimé le ${new Date().toLocaleString('fr-FR')}<br>
-    Document de fermeture — à conserver
-  </div>
-</body>
-</html>`;
-}
-
-function printXCaisse(params: {
-  session: CashSession;
-  summary: SalesSummary;
-  restaurantName: string;
-  sym: string;
-  cashierName: string;
-  address: string;
-  phone: string;
-}) {
-  printViaIframe(buildXCaisseHtml(params), '__xcaisse_print_frame__');
-}
-
 function fmt(n: number, sym: string) {
   return `${n.toLocaleString('fr-FR')} ${sym}`;
+}
+
+async function printXCaisse(params: {
+  session: CashSession;
+  summary: SalesSummary;
+  restaurantName: string;
+  sym: string;
+  cashierName: string;
+  address: string;
+  phone: string;
+  vatNumber?: string;
+  siret?: string;
+}): Promise<boolean> {
+  const { session, summary, restaurantName, sym, cashierName, address, phone, vatNumber, siret } = params;
+  return printXReport(
+    {
+      sessionNumber: session.session_number,
+      openedAt: session.opened_at,
+      closedAt: session.closed_at ?? new Date().toISOString(),
+      cashierName,
+      salesCount: summary.sales_count,
+      totalSales: summary.total_sales,
+      byMethod: {
+        cash: session.total_cash,
+        wave: session.total_wave,
+        orange_money: session.total_orange_money,
+        card: session.total_card,
+      },
+      byCategory: summary.by_category,
+      openingBalance: session.opening_balance,
+      expectedCash: session.expected_cash,
+      actualCash: session.actual_cash,
+      cashDifference: session.cash_difference,
+      notes: session.notes,
+    },
+    {
+      restaurant_name: restaurantName,
+      address,
+      phone,
+      vat_number: vatNumber,
+      siret,
+      currency_symbol: sym,
+    },
+  );
 }
 
 const METHOD_CONFIG: { id: PaymentMethod; label: string; icon: typeof Banknote; color: string }[] = [
@@ -127,6 +89,8 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
   const siteId = currentSite?.id ?? null;
   const { settings } = useSettings();
   const sym = settings.currency_symbol;
+  const { connected: printerConnected } = usePrinter();
+  const { toast } = useToast();
 
   const [step, setStep] = useState<'review' | 'count' | 'confirm' | 'done'>('review');
   const [summary, setSummary] = useState<SalesSummary>({ total_sales: 0, sales_count: 0, by_method: { cash: 0, wave: 0, orange_money: 0, card: 0 }, by_category: [] });
@@ -224,23 +188,35 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
       const session = data as CashSession;
       setClosedSession(session);
       setStep('done');
-      // Impression automatique du X de caisse
-      printXCaisse({
-        session,
-        summary,
-        restaurantName: settings.restaurant_name,
-        sym,
-        cashierName: currentUser?.name ?? 'Caissier',
-        address: settings.address,
-        phone: settings.phone,
-      });
       onClosed(session);
+      // Impression automatique du X de caisse via l'imprimante ESC/POS (Zadig)
+      if (!printerConnected) {
+        toast('error', 'Imprimante non connectée — X de caisse non imprimé');
+      } else {
+        const ok = await printXCaisse({
+          session,
+          summary,
+          restaurantName: settings.restaurant_name,
+          sym,
+          cashierName: currentUser?.name ?? 'Caissier',
+          address: settings.address,
+          phone: settings.phone,
+          vatNumber: settings.vat_number,
+          siret: settings.siret,
+        });
+        if (ok) toast('success', 'X de caisse imprimé');
+        else toast('error', "Échec d'impression du X de caisse");
+      }
     }
   }
 
-  function handleReprint() {
+  async function handleReprint() {
     if (!closedSession) return;
-    printXCaisse({
+    if (!printerConnected) {
+      toast('error', 'Imprimante non connectée');
+      return;
+    }
+    const ok = await printXCaisse({
       session: closedSession,
       summary,
       restaurantName: settings.restaurant_name,
@@ -248,7 +224,11 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
       cashierName: currentUser?.name ?? 'Caissier',
       address: settings.address,
       phone: settings.phone,
+      vatNumber: settings.vat_number,
+      siret: settings.siret,
     });
+    if (ok) toast('success', 'X de caisse imprimé');
+    else toast('error', "Échec d'impression du X de caisse");
   }
 
   return (
