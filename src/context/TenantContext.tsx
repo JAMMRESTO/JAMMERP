@@ -214,7 +214,16 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     const site = siteData as Site;
     setSites([site]);
     setCurrentSite(site);
-    setIsOnboardingDone(!!settingData?.value);
+    // Site managers and cashiers cannot complete the onboarding wizard.
+    // Consider onboarding done as long as a site exists; fall back to the
+    // site name for the restaurant name until the owner fills in settings.
+    if (!settingData?.value && site.name) {
+      await supabase.from('settings').upsert(
+        { site_id: site.id, key: 'restaurant_name', value: site.name, updated_at: new Date().toISOString() },
+        { onConflict: 'site_id,key' }
+      );
+    }
+    setIsOnboardingDone(true);
   }
 
   async function loadTenantData(ownerId: string) {

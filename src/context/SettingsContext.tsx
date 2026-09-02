@@ -52,9 +52,18 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [rawSettings, setRawSettings] = useState<RestaurantSettings>(defaultSettings);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Intersect the site's active_modules with what the super admin allows for this tenant
+  // Intersect the site's active_modules with what the super admin allows for this tenant.
+  // Also fall back to the site's own name/address/phone when the corresponding setting
+  // hasn't been filled in yet (e.g. onboarding not completed by the tenant owner) so
+  // cashiers still see a correct restaurant name on tickets and headers.
   const settings = useMemo<RestaurantSettings>(() => ({
     ...rawSettings,
+    restaurant_name:
+      rawSettings.restaurant_name && rawSettings.restaurant_name !== defaultSettings.restaurant_name
+        ? rawSettings.restaurant_name
+        : (currentSite?.name || rawSettings.restaurant_name),
+    address: rawSettings.address || currentSite?.address || '',
+    phone: rawSettings.phone || currentSite?.phone || '',
     active_modules: {
       pos:          rawSettings.active_modules.pos          && allowedModules.pos,
       delivery:     rawSettings.active_modules.delivery     && allowedModules.delivery,
@@ -64,7 +73,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       reservations: rawSettings.active_modules.reservations && allowedModules.reservations,
       production:   rawSettings.active_modules.production   && allowedModules.production,
     },
-  }), [rawSettings, allowedModules]);
+  }), [rawSettings, allowedModules, currentSite]);
 
   useEffect(() => {
     if (currentSite) {
