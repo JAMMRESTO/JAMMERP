@@ -31,31 +31,32 @@ export const THERMAL_CSS = `
   ${BASE_PRINT_CSS}
   body {
     font-family: 'Courier New', Courier, monospace;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     color: #000;
     background: #fff;
-    width: 72mm;
-    padding: 5px 5px 12px;
+    width: 76mm;
+    padding: 4px 4px 10px;
   }
-  .sep  { border: none; border-top: 1px dashed #000; margin: 5px 0; }
-  .sep-solid { border: none; border-top: 2px solid #000; margin: 5px 0; }
+  .sep  { border: none; border-top: 1px dashed #000; margin: 4px 0; }
+  .sep-solid { border: none; border-top: 2px solid #000; margin: 4px 0; }
   .center { text-align: center; }
-  .name { font-family: Impact, 'Arial Narrow', sans-serif; font-size: 17px; letter-spacing: 1px; text-align: center; }
-  .section-title { font-family: Impact, 'Arial Narrow', sans-serif; font-size: 12px; letter-spacing: 0.5px; margin: 4px 0 2px; }
-  .row { display: flex; justify-content: space-between; align-items: baseline; padding: 1px 0; font-size: 12px; font-weight: 700; }
+  .name { font-family: Impact, 'Arial Narrow', sans-serif; font-size: 16px; letter-spacing: 1px; text-align: center; }
+  .section-title { font-family: Impact, 'Arial Narrow', sans-serif; font-size: 11px; letter-spacing: 0.5px; margin: 3px 0 2px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; padding: 1px 0; font-size: 11px; font-weight: 700; }
   .row .lbl { flex: 1; }
   .row .val { font-weight: 700; text-align: right; white-space: nowrap; margin-left: 4px; }
-  .total-row { font-family: Impact, 'Arial Narrow', sans-serif; font-size: 15px; letter-spacing: 0.5px; }
-  .col-header { display: flex; font-size: 11px; font-weight: 700; padding: 2px 0; border-bottom: 2px solid #000; }
-  .item-row { display: flex; font-size: 12px; font-weight: 700; padding: 2px 0; align-items: baseline; }
-  .qty  { width: 24px; flex-shrink: 0; }
-  .desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 4px; }
-  .pu   { width: 48px; text-align: right; flex-shrink: 0; margin-right: 10px; font-weight: 400; }
-  .ttl  { width: 48px; text-align: right; flex-shrink: 0; }
-  .banner { text-align: center; font-family: Impact, 'Arial Narrow', sans-serif; font-size: 13px; letter-spacing: 1px; font-weight: 700; background: #000; color: #fff; padding: 3px 0; margin: 4px 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .footer { margin-top: 8px; font-size: 10px; text-align: center; }
-  @media print { body { padding: 3px 2px 8px; } @page { margin: 3mm; size: 80mm auto; } }
+  .total-row { font-family: Impact, 'Arial Narrow', sans-serif; font-size: 14px; letter-spacing: 0.5px; }
+  .col-header { display: flex; font-size: 10px; font-weight: 700; padding: 2px 0; border-bottom: 2px solid #000; }
+  .item-row { display: flex; font-size: 11px; font-weight: 700; padding: 2px 0; align-items: baseline; }
+  .qty  { width: 28px; flex-shrink: 0; }
+  .desc { flex: 1; min-width: 0; padding-right: 4px; }
+  .pu   { width: 52px; text-align: right; flex-shrink: 0; margin-right: 8px; font-weight: 400; }
+  .ttl  { width: 52px; text-align: right; flex-shrink: 0; }
+  .item-sub { font-size: 10px; padding-left: 28px; font-weight: 700; }
+  .banner { text-align: center; font-family: Impact, 'Arial Narrow', sans-serif; font-size: 12px; letter-spacing: 1px; font-weight: 700; background: #000; color: #fff; padding: 3px 0; margin: 4px 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .footer { margin-top: 6px; font-size: 10px; text-align: center; }
+  @media print { body { padding: 2px 2px 6px; } @page { margin: 2mm; size: 80mm auto; } }
 `;
 
 /** Shared A4 layout rules — used by both portrait and landscape variants. */
@@ -316,13 +317,13 @@ export function buildSaleReceiptBody(
 
   const itemsHtml = data.items.map(item => {
     const variant = item.variant_label
-      ? `<div style="font-size:10px;padding-left:24px;">[${esc(item.variant_label)}]</div>`
+      ? `<div class="item-sub">[${esc(item.variant_label)}]</div>`
       : '';
     const saucesLine = item.sauces && item.sauces.length > 0
-      ? `<div style="font-size:11px;padding-left:24px;font-weight:700;">&#8627; Sauces : ${esc(item.sauces.map(s => s.name).join(', '))}</div>`
+      ? `<div class="item-sub">&#8627; Sauces : ${esc(item.sauces.map(s => s.name).join(', '))}</div>`
       : '';
     const flavorsLine = item.flavors && item.flavors.length > 0
-      ? `<div style="font-size:11px;padding-left:24px;font-weight:700;">&#8627; Gouts : ${esc(item.flavors.map(f => f.name).join(', '))}</div>`
+      ? `<div class="item-sub">&#8627; Gouts : ${esc(item.flavors.map(f => f.name).join(', '))}</div>`
       : '';
     return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}${saucesLine}${flavorsLine}`;
   }).join('');

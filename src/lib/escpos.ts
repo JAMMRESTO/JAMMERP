@@ -29,9 +29,19 @@ const RIGHT = new Uint8Array([ESC, 0x61, 0x02]);
 
 // ─── Byte helpers ───
 
+function printerSafeText(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\\u0300-\\u036f]/g, '')
+    .replace(/[’‘]/g, "'")
+    .replace(/[–—]/g, '-')
+    .replace(/€/g, 'EUR')
+    .replace(/[\\u00a0\\u202f]/g, ' ');
+}
+
 function strBytes(s: string): Uint8Array {
   const enc = new TextEncoder();
-  return enc.encode(s);
+  return enc.encode(printerSafeText(s));
 }
 
 function concat(...arrays: Uint8Array[]): Uint8Array {
@@ -187,17 +197,52 @@ function line(text: string): Uint8Array {
   return strBytes(text + '\n');
 }
 
-function dashedLine(width = 32): Uint8Array {
+function dashedLine(width = RECEIPT_WIDTH): Uint8Array {
   return strBytes('-'.repeat(width) + '\n');
 }
 
-function solidLine(width = 32): Uint8Array {
+function solidLine(width = RECEIPT_WIDTH): Uint8Array {
   return strBytes('='.repeat(width) + '\n');
 }
 
-function padLine(left: string, right: string, width = 32): string {
-  const space = Math.max(1, width - left.length - right.length);
-  return left + ' '.repeat(space) + right + '\n';
+const RECEIPT_WIDTH = 42;
+const RECEIPT_QTY_WIDTH = 4;
+const RECEIPT_DESCRIPTION_WIDTH = 16;
+const RECEIPT_UNIT_WIDTH = 10;
+const RECEIPT_TOTAL_WIDTH = 12;
+
+function fitText(text: string, width: number): string {
+  return printerSafeText(text).slice(0, width);
+}
+
+function padLine(left: string, right: string, width = RECEIPT_WIDTH): string {
+  const safeLeft = fitText(left, width);
+  const safeRight = fitText(right, width);
+  const space = Math.max(1, width - safeLeft.length - safeRight.length);
+  return safeLeft + ' '.repeat(space) + safeRight + '\n';
+}
+
+function padColumns(qty: string, description: string, unit: string, total: string): string {
+  return `${fitText(qty, RECEIPT_QTY_WIDTH).padEnd(RECEIPT_QTY_WIDTH)}${fitText(description, RECEIPT_DESCRIPTION_WIDTH).padEnd(RECEIPT_DESCRIPTION_WIDTH)}${fitText(unit, RECEIPT_UNIT_WIDTH).padStart(RECEIPT_UNIT_WIDTH)}${fitText(total, RECEIPT_TOTAL_WIDTH).padStart(RECEIPT_TOTAL_WIDTH)}\n`;
+}
+
+function wrapPrinterText(text: string, width: number): string[] {
+  const words = printerSafeText(text).trim().split(/\\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (!current) {
+      current = word.slice(0, width);
+    } else if ((current.length + 1 + word.length) <= width) {
+      current += ` ${word}`;
+    } else {
+      lines.push(current);
+      current = word.slice(0, width);
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
 }
 
 // ─── Kitchen ticket (compact, no restaurant info) ───
@@ -248,15 +293,18 @@ export function buildKitchenTicketBytes(data: EscposKitchenData): Uint8Array {
 
   parts.push(line(timeStr), dashedLine());
 
-  // Items
   for (const item of data.items) {
+    const nameLines = wrapPrinterText(item.product_name, 28);
     parts.push(
       BOLD_ON,
       DOUBLE_ON,
-      line(`${item.quantity}x ${item.product_name}`),
+      line(`${item.quantity}x ${nameLines[0]}`),
       DOUBLE_OFF,
       BOLD_OFF,
     );
+    for (const nameLine of nameLines.slice(1)) {
+      parts.push(line(`   ${nameLine}`));
+    }
     if (item.variant_label) {
       parts.push(strBytes(`  > ${item.variant_label}\n`));
     }
@@ -334,8 +382,9 @@ export function buildReceiptBytes(
   data: EscposReceiptData,
   settings: EscposReceiptSettings
 ): Uint8Array {
-  const sym = settings.currency_symbol;
-  const fmt = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} ${sym}`;
+  const sym = printerSafeText(settings.currency_symbol);
+  const fmtNumber = (n: number) => printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
+  const fmt = (n: number) => `${fmtNumber(n)} ${sym}`;
 
   const dateObj = new Date(data.createdAt);
   const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -343,7 +392,6 @@ export function buildReceiptBytes(
 
   const parts: Uint8Array[] = [INIT, CENTER];
 
-  // Restaurant header
   parts.push(
     BOLD_ON,
     LARGE_ON,
@@ -355,9 +403,8 @@ export function buildReceiptBytes(
   if (settings.phone) parts.push(line(`Tel: ${settings.phone}`));
   if (settings.vat_number) parts.push(line(`TVA: ${settings.vat_number}`));
   if (settings.siret) parts.push(line(`SIRET: ${settings.siret}`));
-  parts.push(LEFT, solidLine());
+  parts.push(LEFT, solidLine(RECEIPT_WIDTH));
 
-  // Meta
   parts.push(strBytes(padLine(`Ticket N: ${data.saleNumber}`, '')));
   parts.push(strBytes(padLine(`Date: ${dateStr}`, `Heure: ${timeStr}`)));
   if (data.tableNumber) {
@@ -369,51 +416,48 @@ export function buildReceiptBytes(
   if (data.saleType !== 'dine_in') {
     parts.push(strBytes(padLine('Mode:', saleTypeReceiptLabels[data.saleType] ?? data.saleType)));
   }
-  parts.push(dashedLine());
+  parts.push(strBytes('-'.repeat(RECEIPT_WIDTH) + '\\n'));
+  parts.push(strBytes(padColumns('Qte', 'Designation', 'P.U.', 'Total')));
+  parts.push(strBytes('-'.repeat(RECEIPT_WIDTH) + '\\n'));
 
-  // Column header
-  parts.push(strBytes(padLine('Qté  Designation', 'Total'), dashedLine()));
-
-  // Items
   for (const item of data.items) {
-    const name = `${item.quantity}x  ${item.product_name}`;
-    parts.push(strBytes(padLine(name, fmtNum(item.subtotal))));
+    const nameLines = wrapPrinterText(item.product_name, RECEIPT_DESCRIPTION_WIDTH);
+    parts.push(strBytes(padColumns(`${item.quantity}x`, nameLines[0], fmtNumber(item.unit_price), fmtNumber(item.subtotal))));
+    for (const nameLine of nameLines.slice(1)) {
+      parts.push(strBytes(padColumns('', nameLine, '', '')));
+    }
     if (item.variant_label) {
-      parts.push(strBytes(`  [${item.variant_label}]\n`));
+      parts.push(strBytes(`  > ${printerSafeText(item.variant_label)}\\n`));
     }
     if (item.sauces && item.sauces.length > 0) {
-      parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => s.name).join(', ')}\n`));
+      parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => printerSafeText(s.name)).join(', ')}\\n`));
     }
     if (item.flavors && item.flavors.length > 0) {
-      parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => f.name).join(', ')}\n`));
+      parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => printerSafeText(f.name)).join(', ')}\\n`));
     }
   }
 
-  // Totals
-  parts.push(dashedLine());
+  parts.push(strBytes('-'.repeat(RECEIPT_WIDTH) + '\\n'));
   if (data.discountAmount > 0) {
     parts.push(strBytes(padLine('Sous-total', fmt(data.subtotal))));
     parts.push(strBytes(padLine('Remise', `- ${fmt(data.discountAmount)}`)));
   }
   parts.push(strBytes(padLine(`TVA (${settings.tax_rate}%)`, fmt(data.taxAmount))));
-  parts.push(solidLine(), BOLD_ON, DOUBLE_ON, strBytes(padLine('TOTAL', fmt(data.total))), DOUBLE_OFF, BOLD_OFF, solidLine());
+  parts.push(solidLine(RECEIPT_WIDTH), BOLD_ON, line('TOTAL TTC'), CENTER, DOUBLE_ON, line(fmt(data.total)), DOUBLE_OFF, LEFT, BOLD_OFF, solidLine(RECEIPT_WIDTH));
 
-  // Payments
   parts.push(BOLD_ON, line('MODE DE REGLEMENT'), BOLD_OFF);
   for (const p of data.payments) {
     parts.push(strBytes(padLine(`${paymentMethodLabels[p.method] ?? p.method}:`, fmt(p.amount))));
   }
-  parts.push(dashedLine());
+  parts.push(strBytes('-'.repeat(RECEIPT_WIDTH) + '\\n'));
 
-  // Footer
   parts.push(CENTER, line(settings.receipt_footer || 'Merci de votre visite!'), line('A bientot.'), LEFT);
-
   parts.push(FEED(5), CUT);
   return concat(...parts);
 }
 
 function fmtNum(n: number): string {
-  return n.toLocaleString('fr-FR', { maximumFractionDigits: 0 });
+  return printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
 }
 
 // ─── Combined: kitchen + receipt with cut between ───
