@@ -134,8 +134,6 @@ export function ProductsPage() {
             <ProductForm
               product={editingProduct ?? null}
               categories={categories}
-              sauces={sauces}
-              flavors={flavors}
               onSave={() => { setEditingProduct(undefined); }}
               onCancel={() => setEditingProduct(undefined)}
             />

@@ -113,6 +113,14 @@ export interface Category {
   sort_order: number;
   is_active: boolean;
   track_stock: boolean;
+  requires_sauce: boolean;
+  sauce_required: boolean;
+  sauce_count: number;
+  allowed_sauce_ids: string[];
+  requires_flavor: boolean;
+  flavor_required: boolean;
+  flavor_count: number;
+  allowed_flavor_ids: string[];
   created_at: string;
 }
 

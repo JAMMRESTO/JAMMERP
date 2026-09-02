@@ -53,8 +53,13 @@ function POSInner() {
     setDrawerOpening(true);
     const ok = await openCashDrawer();
     setDrawerOpening(false);
-    if (ok) toast('success', 'Tiroir ouvert');
-    else toast('error', "Impossible d'ouvrir le tiroir");
+    if (ok) {
+      toast('success', 'Tiroir ouvert');
+    } else if (!printerConnected) {
+      toast('error', 'Imprimante deconnectee, tiroir impossible');
+    } else {
+      toast('error', "Echec de l'ouverture du tiroir. Verifiez le branchement RJ11 entre l'imprimante et le tiroir.");
+    }
   }, [drawerOpening, printerConnected, toast]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -421,7 +426,7 @@ function POSInner() {
           </div>
           {/* Extra bottom padding on mobile so products aren't hidden behind cart bar */}
           <div className={`flex-1 overflow-y-auto px-3 sm:px-4 scrollbar-thin ${itemCount > 0 ? 'pb-24 lg:pb-4' : 'pb-3 sm:pb-4'}`}>
-            <ProductGrid products={filteredProducts} loading={loading} />
+            <ProductGrid products={filteredProducts} categories={categories} loading={loading} />
           </div>
         </div>
 

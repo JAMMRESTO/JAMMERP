@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
@@ -8,7 +8,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../ui/Toast';
 import { useTenant } from '../../context/TenantContext';
-import type { Category } from '../../types/database';
+import type { Category, Sauce, Flavor } from '../../types/database';
 
 const ICONS: { id: string; icon: LucideIcon }[] = [
   { id: 'utensils', icon: Utensils },
@@ -33,23 +33,38 @@ function getIcon(name: string): LucideIcon {
 
 interface CategoryFormProps {
   initial?: Partial<Category>;
+  sauces: Sauce[];
+  flavors: Flavor[];
   onSave: (data: Omit<Category, 'id' | 'created_at'>) => Promise<void>;
   onCancel: () => void;
 }
 
-function CategoryForm({ initial, onSave, onCancel }: CategoryFormProps) {
+function CategoryForm({ initial, sauces, flavors, onSave, onCancel }: CategoryFormProps) {
   const [name, setName] = useState(initial?.name ?? '');
   const [icon, setIcon] = useState(initial?.icon ?? 'utensils');
   const [color, setColor] = useState(initial?.color ?? '#3B82F6');
   const [sortOrder, setSortOrder] = useState(initial?.sort_order ?? 0);
   const [trackStock, setTrackStock] = useState(initial?.track_stock ?? true);
+  const [requiresSauce, setRequiresSauce] = useState(initial?.requires_sauce ?? false);
+  const [sauceRequired, setSauceRequired] = useState(initial?.sauce_required ?? false);
+  const [sauceCount, setSauceCount] = useState(initial?.sauce_count ?? 1);
+  const [allowedSauceIds, setAllowedSauceIds] = useState<string[]>(initial?.allowed_sauce_ids ?? []);
+  const [requiresFlavor, setRequiresFlavor] = useState(initial?.requires_flavor ?? false);
+  const [flavorRequired, setFlavorRequired] = useState(initial?.flavor_required ?? false);
+  const [flavorCount, setFlavorCount] = useState(initial?.flavor_count ?? 1);
+  const [allowedFlavorIds, setAllowedFlavorIds] = useState<string[]>(initial?.allowed_flavor_ids ?? []);
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
     setSaving(true);
-    await onSave({ name: name.trim(), icon, color, sort_order: sortOrder, is_active: initial?.is_active ?? true, track_stock: trackStock });
+    await onSave({
+      name: name.trim(), icon, color, sort_order: sortOrder,
+      is_active: initial?.is_active ?? true, track_stock: trackStock,
+      requires_sauce: requiresSauce, sauce_required: sauceRequired, sauce_count: sauceCount, allowed_sauce_ids: allowedSauceIds,
+      requires_flavor: requiresFlavor, flavor_required: flavorRequired, flavor_count: flavorCount, allowed_flavor_ids: allowedFlavorIds,
+    });
     setSaving(false);
   }
 
@@ -167,7 +182,81 @@ function CategoryForm({ initial, onSave, onCancel }: CategoryFormProps) {
       {!trackStock && (
         <p className="text-amber-400/70 text-xs">Les produits de cette catégorie seront toujours disponibles à la vente, sans limite de stock.</p>
       )}
+
+      <CategoryOptionSection
+        title="Sauces"
+        enabled={requiresSauce}
+        required={sauceRequired}
+        count={sauceCount}
+        selectedIds={allowedSauceIds}
+        options={sauces}
+        emptyLabel="Aucune sauce active. Ajoutez-en depuis la gestion des produits."
+        onEnabledChange={setRequiresSauce}
+        onRequiredChange={setSauceRequired}
+        onCountChange={setSauceCount}
+        onToggle={id => setAllowedSauceIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])}
+      />
+      <CategoryOptionSection
+        title="Gouts"
+        enabled={requiresFlavor}
+        required={flavorRequired}
+        count={flavorCount}
+        selectedIds={allowedFlavorIds}
+        options={flavors}
+        emptyLabel="Aucun gout actif. Ajoutez-en depuis la gestion des produits."
+        onEnabledChange={setRequiresFlavor}
+        onRequiredChange={setFlavorRequired}
+        onCountChange={setFlavorCount}
+        onToggle={id => setAllowedFlavorIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])}
+      />
     </motion.form>
+  );
+}
+
+interface CategoryOption {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
+interface CategoryOptionSectionProps {
+  title: string;
+  enabled: boolean;
+  required: boolean;
+  count: number;
+  selectedIds: string[];
+  options: CategoryOption[];
+  emptyLabel: string;
+  onEnabledChange: (value: boolean) => void;
+  onRequiredChange: (value: boolean) => void;
+  onCountChange: (value: number) => void;
+  onToggle: (id: string) => void;
+}
+
+function CategoryOptionSection({ title, enabled, required, count, selectedIds, options, emptyLabel, onEnabledChange, onRequiredChange, onCountChange, onToggle }: CategoryOptionSectionProps) {
+  const activeOptions = options.filter(option => option.is_active);
+  return (
+    <div className="bg-white/3 rounded-2xl border border-white/8 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-white/70 text-sm font-semibold">{title} pour cette catégorie</span>
+        <button type="button" onClick={() => onEnabledChange(!enabled)} className={`relative w-9 h-5 rounded-full transition-colors ${enabled ? 'bg-emerald-600' : 'bg-white/10'}`}>
+          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+        </button>
+      </div>
+      {enabled && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => onRequiredChange(true)} className={`px-3 py-2 rounded-xl border text-xs ${required ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50'}`}>Obligatoire</button>
+            <button type="button" onClick={() => onRequiredChange(false)} className={`px-3 py-2 rounded-xl border text-xs ${!required ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50'}`}>Facultatif</button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {[1, 2, 3].map(value => <button key={value} type="button" onClick={() => onCountChange(value)} className={`px-2 py-2 rounded-xl border text-xs ${count === value ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-white/50'}`}>{value} choix</button>)}
+          </div>
+          {activeOptions.length === 0 ? <p className="text-white/40 text-xs p-3 rounded-xl bg-white/3 border border-white/8">{emptyLabel}</p> : <div className="flex flex-wrap gap-1.5">{activeOptions.map(option => <button key={option.id} type="button" onClick={() => onToggle(option.id)} className={`px-3 py-1.5 rounded-xl border text-xs ${selectedIds.includes(option.id) ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : 'bg-white/5 border-white/10 text-white/60'}`}>{option.name}</button>)}</div>}
+          <p className="text-white/25 text-[10px]">Aucune sélection signifie que tous les éléments actifs seront proposés.</p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -182,6 +271,19 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
   const siteId = currentSite?.id ?? null;
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [sauces, setSauces] = useState<Sauce[]>([]);
+  const [flavors, setFlavors] = useState<Flavor[]>([]);
+
+  useEffect(() => {
+    if (!siteId) return;
+    Promise.all([
+      supabase.from('sauces').select('id,name,is_active').eq('site_id', siteId).order('sort_order').order('name'),
+      supabase.from('flavors').select('id,name,is_active').eq('site_id', siteId).order('sort_order').order('name'),
+    ]).then(([sauceResult, flavorResult]) => {
+      if (sauceResult.data) setSauces(sauceResult.data as Sauce[]);
+      if (flavorResult.data) setFlavors(flavorResult.data as Flavor[]);
+    });
+  }, [siteId]);
 
   async function handleCreate(data: Omit<Category, 'id' | 'created_at'>) {
     const dataWithSite = siteId ? { ...data, site_id: siteId } : data;
@@ -231,6 +333,8 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
       <AnimatePresence>
         {showForm && (
           <CategoryForm
+            sauces={sauces}
+            flavors={flavors}
             onSave={handleCreate}
             onCancel={() => setShowForm(false)}
           />
@@ -246,6 +350,8 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                 <motion.div key={cat.id} layout>
                   <CategoryForm
                     initial={cat}
+                    sauces={sauces}
+                    flavors={flavors}
                     onSave={data => handleUpdate(cat.id, data)}
                     onCancel={() => setEditingId(null)}
                   />

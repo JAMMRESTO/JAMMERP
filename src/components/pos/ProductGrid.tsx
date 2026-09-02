@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertCircle, ChevronDown, X, Utensils, Check } from 'lucide-react';
-import type { Product, ProductVariant, Sauce, SelectedSauce, Flavor, SelectedFlavor } from '../../types/database';
+import type { Product, ProductVariant, Sauce, SelectedSauce, Flavor, SelectedFlavor, Category } from '../../types/database';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 
@@ -168,35 +168,35 @@ function SauceModal({ product, sauces, required, maxCount, onConfirm, onClose }:
           </div>
 
           <div className="p-5 pt-4 max-h-[55vh] overflow-y-auto">
-            <div className="flex flex-col gap-2">
-              {sauces.length === 0 ? (
-                <p className="text-white/40 text-sm text-center py-6">Aucune sauce disponible</p>
-              ) : sauces.map(s => {
-                const isSelected = selected.some(x => x.id === s.id);
-                const disabled = !isSelected && selected.length >= maxCount && maxCount > 1;
-                return (
-                  <motion.button
-                    key={s.id}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => toggle(s)}
-                    disabled={disabled}
-                    className={`w-full px-4 py-3 rounded-2xl border text-left transition-all flex items-center justify-between gap-3
-                      ${isSelected
-                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-100'
-                        : disabled
-                          ? 'bg-white/2 border-white/5 text-white/25'
-                          : 'bg-white/5 hover:bg-amber-500/10 border-white/10 hover:border-amber-500/30 text-white'}`}
-                  >
-                    <span className="text-sm font-medium truncate">{s.name}</span>
-                    <span className="flex items-center gap-2 flex-shrink-0">
-                      <span className={`w-5 h-5 rounded-md border flex items-center justify-center ${isSelected ? 'bg-amber-500 border-amber-500' : 'border-white/20'}`}>
+            {sauces.length === 0 ? (
+              <p className="text-white/40 text-sm text-center py-6">Aucune sauce disponible</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {sauces.map(s => {
+                  const isSelected = selected.some(x => x.id === s.id);
+                  const disabled = !isSelected && selected.length >= maxCount && maxCount > 1;
+                  return (
+                    <motion.button
+                      key={s.id}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={() => toggle(s)}
+                      disabled={disabled}
+                      className={`aspect-square rounded-2xl border transition-all flex flex-col items-center justify-center gap-1.5 p-2 text-center
+                        ${isSelected
+                          ? 'bg-amber-500/20 border-amber-500/50 text-amber-100'
+                          : disabled
+                            ? 'bg-white/2 border-white/5 text-white/25'
+                            : 'bg-white/5 hover:bg-amber-500/10 border-white/10 hover:border-amber-500/30 text-white'}`}
+                    >
+                      <span className="text-xs font-medium leading-tight line-clamp-3 break-words">{s.name}</span>
+                      <span className={`w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-amber-500 border-amber-500' : 'border-white/20'}`}>
                         {isSelected && <Check size={13} className="text-gray-900" strokeWidth={3} />}
                       </span>
-                    </span>
-                  </motion.button>
-                );
-              })}
-            </div>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="p-5 pt-0 flex gap-2">
@@ -295,33 +295,35 @@ function FlavorModal({ product, flavors, required, maxCount, onConfirm, onClose 
           </div>
 
           <div className="p-5 pt-4 max-h-[55vh] overflow-y-auto">
-            <div className="flex flex-col gap-2">
-              {flavors.length === 0 ? (
-                <p className="text-white/40 text-sm text-center py-6">Aucun gout disponible</p>
-              ) : flavors.map(f => {
-                const isSelected = selected.some(x => x.id === f.id);
-                const disabled = !isSelected && selected.length >= maxCount && maxCount > 1;
-                return (
-                  <motion.button
-                    key={f.id}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => toggle(f)}
-                    disabled={disabled}
-                    className={`w-full px-4 py-3 rounded-2xl border text-left transition-all flex items-center justify-between gap-3
-                      ${isSelected
-                        ? 'bg-blue-500/15 border-blue-500/40 text-blue-100'
-                        : disabled
-                          ? 'bg-white/2 border-white/5 text-white/25'
-                          : 'bg-white/5 hover:bg-blue-500/10 border-white/10 hover:border-blue-500/30 text-white'}`}
-                  >
-                    <span className="text-sm font-medium truncate">{f.name}</span>
-                    <span className={`w-5 h-5 rounded-md border flex items-center justify-center ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
-                      {isSelected && <Check size={13} className="text-white" strokeWidth={3} />}
-                    </span>
-                  </motion.button>
-                );
-              })}
-            </div>
+            {flavors.length === 0 ? (
+              <p className="text-white/40 text-sm text-center py-6">Aucun gout disponible</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {flavors.map(f => {
+                  const isSelected = selected.some(x => x.id === f.id);
+                  const disabled = !isSelected && selected.length >= maxCount && maxCount > 1;
+                  return (
+                    <motion.button
+                      key={f.id}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={() => toggle(f)}
+                      disabled={disabled}
+                      className={`aspect-square rounded-2xl border transition-all flex flex-col items-center justify-center gap-1.5 p-2 text-center
+                        ${isSelected
+                          ? 'bg-blue-500/20 border-blue-500/50 text-blue-100'
+                          : disabled
+                            ? 'bg-white/2 border-white/5 text-white/25'
+                            : 'bg-white/5 hover:bg-blue-500/10 border-white/10 hover:border-blue-500/30 text-white'}`}
+                    >
+                      <span className="text-xs font-medium leading-tight line-clamp-3 break-words">{f.name}</span>
+                      <span className={`w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
+                        {isSelected && <Check size={13} className="text-white" strokeWidth={3} />}
+                      </span>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="p-5 pt-0 flex gap-2">
@@ -348,10 +350,12 @@ function FlavorModal({ product, flavors, required, maxCount, onConfirm, onClose 
 
 interface ProductCardProps {
   product: Product;
+  categories: Category[];
 }
 
-function ProductCard({ product }: ProductCardProps) {
+function ProductCard({ product, categories }: ProductCardProps) {
   const { addToCart, sauces: allSauces, flavors: allFlavors } = usePOS();
+  const category = categories.find(c => c.id === product.category_id);
   const { settings } = useSettings();
   const [showVariants, setShowVariants] = useState(false);
   const [pendingVariant, setPendingVariant] = useState<{ label: string; price?: number } | null>(null);
@@ -360,18 +364,18 @@ function ProductCard({ product }: ProductCardProps) {
   const [pendingSauces, setPendingSauces] = useState<SelectedSauce[]>([]);
   const [added, setAdded] = useState(false);
   const hasVariants = (product.variants as ProductVariant[]).length > 0;
-  const needsSauce = settings.sauces_enabled && product.requires_sauce;
-  const needsFlavor = settings.flavors_enabled && product.requires_flavor;
+  const needsSauce = settings.sauces_enabled && Boolean(category?.requires_sauce);
+  const needsFlavor = settings.flavors_enabled && Boolean(category?.requires_flavor);
 
   const availableSauces = needsSauce
-    ? (product.allowed_sauce_ids && product.allowed_sauce_ids.length > 0
-        ? allSauces.filter(s => product.allowed_sauce_ids.includes(s.id))
+    ? (category?.allowed_sauce_ids?.length
+        ? allSauces.filter(s => category.allowed_sauce_ids.includes(s.id))
         : allSauces)
     : [];
 
   const availableFlavors = needsFlavor
-    ? (product.allowed_flavor_ids && product.allowed_flavor_ids.length > 0
-        ? allFlavors.filter(fl => product.allowed_flavor_ids.includes(fl.id))
+    ? (category?.allowed_flavor_ids?.length
+        ? allFlavors.filter(fl => category.allowed_flavor_ids.includes(fl.id))
         : allFlavors)
     : [];
 
@@ -450,8 +454,8 @@ function ProductCard({ product }: ProductCardProps) {
         <SauceModal
           product={product}
           sauces={availableSauces}
-          required={product.sauce_required}
-          maxCount={Math.min(3, Math.max(1, product.sauce_count ?? 1))}
+          required={Boolean(category?.sauce_required)}
+          maxCount={Math.min(3, Math.max(1, category?.sauce_count ?? 1))}
           onConfirm={handleSaucesConfirm}
           onClose={() => { setShowSauces(false); setPendingVariant(null); }}
         />
@@ -460,8 +464,8 @@ function ProductCard({ product }: ProductCardProps) {
         <FlavorModal
           product={product}
           flavors={availableFlavors}
-          required={product.flavor_required}
-          maxCount={Math.min(3, Math.max(1, product.flavor_count ?? 1))}
+          required={Boolean(category?.flavor_required)}
+          maxCount={Math.min(3, Math.max(1, category?.flavor_count ?? 1))}
           onConfirm={handleFlavorsConfirm}
           onClose={() => { setShowFlavors(false); setPendingVariant(null); setPendingSauces([]); }}
         />
@@ -533,6 +537,7 @@ function ProductCard({ product }: ProductCardProps) {
 
 interface ProductGridProps {
   products: Product[];
+  categories: Category[];
   loading: boolean;
 }
 
@@ -541,7 +546,7 @@ const gridVariants = {
   visible: { transition: { staggerChildren: 0.03 } },
 };
 
-export function ProductGrid({ products, loading }: ProductGridProps) {
+export function ProductGrid({ products, categories, loading }: ProductGridProps) {
   if (loading) {
     return (
       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
@@ -578,7 +583,7 @@ export function ProductGrid({ products, loading }: ProductGridProps) {
       className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2"
     >
       <AnimatePresence mode="popLayout">
-        {products.map(p => <ProductCard key={p.id} product={p} />)}
+        {products.map(p => <ProductCard key={p.id} product={p} categories={categories} />)}
       </AnimatePresence>
     </motion.div>
   );

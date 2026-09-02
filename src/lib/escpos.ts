@@ -168,9 +168,14 @@ async function sendBytes(data: Uint8Array): Promise<boolean> {
   }
   if (!connectedDevice) return false;
   try {
-    await connectedDevice.transferOut(connectedEndpoint, data);
+    const result = await connectedDevice.transferOut(connectedEndpoint, data);
+    if (result.status !== 'ok') {
+      console.warn('[escpos] transferOut status:', result.status);
+      return false;
+    }
     return true;
-  } catch {
+  } catch (err) {
+    console.warn('[escpos] transferOut failed:', err);
     connectedDevice = null;
     return false;
   }
@@ -179,8 +184,13 @@ async function sendBytes(data: Uint8Array): Promise<boolean> {
 // ─── Test ticket ───
 
 export async function openCashDrawer(): Promise<boolean> {
-  const DRAWER_KICK = new Uint8Array([ESC, 0x70, 0x00, 0x19, 0xff]);
-  return sendBytes(DRAWER_KICK);
+  // Try connector m=0 (DK-1) with a 100ms pulse, then m=1 (DK-2) as fallback.
+  const DRAWER_KICK_1 = concat(INIT, new Uint8Array([ESC, 0x70, 0x00, 0x32, 0xff]));
+  const DRAWER_KICK_2 = concat(INIT, new Uint8Array([ESC, 0x70, 0x01, 0x32, 0xff]));
+
+  const ok1 = await sendBytes(DRAWER_KICK_1);
+  if (ok1) return true;
+  return sendBytes(DRAWER_KICK_2);
 }
 
 export async function printTestTicket(restaurantName: string): Promise<boolean> {

@@ -47,6 +47,7 @@ export function SauceManagerModal({ open, onClose }: SauceManagerModalProps) {
 
   async function handleToggleActive(s: Sauce) {
     await supabase.from('sauces').update({ is_active: !s.is_active, updated_at: new Date().toISOString() }).eq('id', s.id);
+    load();
   }
 
   async function handleDelete(id: string) {
@@ -54,6 +55,7 @@ export function SauceManagerModal({ open, onClose }: SauceManagerModalProps) {
     const { error } = await supabase.from('sauces').delete().eq('id', id);
     if (error) { toast('error', 'Suppression impossible'); return; }
     toast('success', 'Sauce supprimée');
+    load();
   }
 
   if (!open) return null;
@@ -153,7 +155,7 @@ export function SauceManagerModal({ open, onClose }: SauceManagerModalProps) {
               sauce={editing}
               siteId={siteId}
               onClose={() => setShowForm(false)}
-              onSaved={() => { setShowForm(false); }}
+              onSaved={() => { setShowForm(false); load(); }}
             />
           )}
         </AnimatePresence>

@@ -47,6 +47,7 @@ export function FlavorManagerModal({ open, onClose }: FlavorManagerModalProps) {
 
   async function handleToggleActive(f: Flavor) {
     await supabase.from('flavors').update({ is_active: !f.is_active, updated_at: new Date().toISOString() }).eq('id', f.id);
+    load();
   }
 
   async function handleDelete(id: string) {
@@ -54,6 +55,7 @@ export function FlavorManagerModal({ open, onClose }: FlavorManagerModalProps) {
     const { error } = await supabase.from('flavors').delete().eq('id', id);
     if (error) { toast('error', 'Suppression impossible'); return; }
     toast('success', 'Gout supprimé');
+    load();
   }
 
   if (!open) return null;
@@ -153,7 +155,7 @@ export function FlavorManagerModal({ open, onClose }: FlavorManagerModalProps) {
               flavor={editing}
               siteId={siteId}
               onClose={() => setShowForm(false)}
-              onSaved={() => { setShowForm(false); }}
+              onSaved={() => { setShowForm(false); load(); }}
             />
           )}
         </AnimatePresence>
