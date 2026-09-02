@@ -165,7 +165,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activePage, onNavigate, collapsed = false }: SidebarProps) {
-  const { currentUser, fullLogout } = useAuth();
+  const { currentUser, fullLogout, lockSession, logout } = useAuth();
   const { settings } = useSettings();
   const { isSiteManager, authUser } = useTenant();
   const isTenantOwner = !isSiteManager;
@@ -238,16 +238,37 @@ export function Sidebar({ activePage, onNavigate, collapsed = false }: SidebarPr
       {/* Site selector (tenant owner only, multi-site) */}
       {showSitePicker && <SiteSelectorInSidebar collapsed={collapsed} />}
 
-      {/* Bottom: logout + user */}
+      {/* Bottom: session actions + user */}
       <div className="flex-shrink-0 border-t border-white/8 p-2 space-y-0.5">
-        <button
-          onClick={fullLogout}
-          title={collapsed ? 'Déconnexion' : undefined}
-          className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-3 py-2.5 rounded-xl text-white/40 hover:text-red-400 hover:bg-red-500/8 transition-all text-[13px] font-medium`}
-        >
-          <LogOut size={15} className="flex-shrink-0" />
-          {!collapsed && <span>Déconnexion</span>}
-        </button>
+        {isSiteManager ? (
+          <>
+            <button
+              onClick={lockSession}
+              title={collapsed ? 'Verrouiller' : undefined}
+              className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-3 py-2.5 rounded-xl text-white/40 hover:text-amber-400 hover:bg-amber-500/8 transition-all text-[13px] font-medium`}
+            >
+              <Lock size={15} className="flex-shrink-0" />
+              {!collapsed && <span>Verrouiller</span>}
+            </button>
+            <button
+              onClick={logout}
+              title={collapsed ? 'Changer de compte' : undefined}
+              className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-3 py-2.5 rounded-xl text-white/40 hover:text-blue-400 hover:bg-blue-500/8 transition-all text-[13px] font-medium`}
+            >
+              <LogOut size={15} className="flex-shrink-0" />
+              {!collapsed && <span>Changer de compte</span>}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={fullLogout}
+            title={collapsed ? 'Déconnexion' : undefined}
+            className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-3 py-2.5 rounded-xl text-white/40 hover:text-red-400 hover:bg-red-500/8 transition-all text-[13px] font-medium`}
+          >
+            <LogOut size={15} className="flex-shrink-0" />
+            {!collapsed && <span>Déconnexion</span>}
+          </button>
+        )}
 
         {(currentUser || isTenantOwner) && (
           <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'} px-2 pt-2 pb-1`}>
@@ -272,7 +293,7 @@ export function Sidebar({ activePage, onNavigate, collapsed = false }: SidebarPr
 }
 
 export function MobileSidebar({ activePage, onNavigate, open, onClose }: SidebarProps & { open: boolean; onClose: () => void }) {
-  const { currentUser, fullLogout } = useAuth();
+  const { currentUser, fullLogout, lockSession, logout } = useAuth();
   const { settings } = useSettings();
   const { isSiteManager, authUser } = useTenant();
   const isTenantOwner = !isSiteManager;
@@ -344,9 +365,20 @@ export function MobileSidebar({ activePage, onNavigate, open, onClose }: Sidebar
             </nav>
             {showSitePicker && <SiteSelectorInSidebar />}
             <div className="border-t border-white/8 p-2 space-y-0.5">
-              <button onClick={fullLogout} className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-white/40 hover:text-red-400 hover:bg-red-500/8 transition-all text-[13px] font-medium">
-                <LogOut size={15} /> Déconnexion
-              </button>
+              {isSiteManager ? (
+                <>
+                  <button onClick={() => { onClose(); lockSession(); }} className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-white/40 hover:text-amber-400 hover:bg-amber-500/8 transition-all text-[13px] font-medium">
+                    <Lock size={15} /> Verrouiller
+                  </button>
+                  <button onClick={() => { onClose(); logout(); }} className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-white/40 hover:text-blue-400 hover:bg-blue-500/8 transition-all text-[13px] font-medium">
+                    <LogOut size={15} /> Changer de compte
+                  </button>
+                </>
+              ) : (
+                <button onClick={fullLogout} className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-white/40 hover:text-red-400 hover:bg-red-500/8 transition-all text-[13px] font-medium">
+                  <LogOut size={15} /> Déconnexion
+                </button>
+              )}
               {(currentUser || isTenantOwner) && (
                 <div className="flex items-center gap-2 px-2 pt-2 pb-1">
                   <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold" style={{ backgroundColor: userColor + '25', color: userColor, border: `1px solid ${userColor}40` }}>

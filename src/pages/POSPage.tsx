@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, LogOut, Power, CreditCard, Archive } from 'lucide-react';
+import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
 import { printCombined, printReceipt, openCashDrawer, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
@@ -37,7 +37,7 @@ function POSInner() {
     orderNotes,
   } = usePOS();
   const { settings } = useSettings();
-  const { currentUser, lockSession, logout } = useAuth();
+  const { currentUser } = useAuth();
   const { currentSite, authUser, isSiteManager } = useTenant();
   const { connected: printerConnected } = usePrinter();
   const { toast } = useToast();
@@ -393,23 +393,6 @@ function POSInner() {
                 </div>
                 {/* Actions */}
                 <div className="p-1.5 space-y-0.5">
-                  {currentUser && (
-                    <button
-                      onClick={() => { setShowUserMenu(false); lockSession(); }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-amber-400 hover:bg-amber-500/10 text-xs font-medium transition-all text-left"
-                    >
-                      <Lock size={13} />
-                      Verrouiller
-                    </button>
-                  )}
-                  <button
-                    onClick={() => { setShowUserMenu(false); logout(); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-blue-400 hover:bg-blue-500/10 text-xs font-medium transition-all text-left"
-                  >
-                    <LogOut size={13} />
-                    Changer de compte
-                  </button>
-                  <div className="border-t border-white/8 my-1" />
                   <button
                     onClick={() => { setShowUserMenu(false); forceCloseApp(); }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-red-300 hover:bg-red-500/15 text-xs font-medium transition-all text-left"
