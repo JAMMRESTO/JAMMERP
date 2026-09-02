@@ -30,13 +30,22 @@ const RIGHT = new Uint8Array([ESC, 0x61, 0x02]);
 // ─── Byte helpers ───
 
 function printerSafeText(text: string): string {
-  return text
+  const normalized = text
     .normalize('NFD')
-    .replace(/[\\u0300-\\u036f]/g, '')
-    .replace(/[’‘]/g, "'")
-    .replace(/[–—]/g, '-')
-    .replace(/€/g, 'EUR')
-    .replace(/[\\u00a0\\u202f]/g, ' ');
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\u20ac/g, 'EUR');
+
+  let out = '';
+  for (const ch of normalized) {
+    const code = ch.charCodeAt(0);
+    if (code === 0x0a || code === 0x0d) { out += ch; continue; }
+    if (code === 0xa0 || code === 0x202f || code === 0x2009 || code === 0x2007) { out += ' '; continue; }
+    if (code >= 0x20 && code <= 0x7e) { out += ch; continue; }
+    out += '?';
+  }
+  return out;
 }
 
 function strBytes(s: string): Uint8Array {
@@ -227,7 +236,7 @@ function padColumns(qty: string, description: string, unit: string, total: strin
 }
 
 function wrapPrinterText(text: string, width: number): string[] {
-  const words = printerSafeText(text).trim().split(/\\s+/).filter(Boolean);
+  const words = printerSafeText(text).trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [''];
   const lines: string[] = [];
   let current = '';
@@ -294,7 +303,7 @@ export function buildKitchenTicketBytes(data: EscposKitchenData): Uint8Array {
   parts.push(line(timeStr), dashedLine());
 
   for (const item of data.items) {
-    const nameLines = wrapPrinterText(item.product_name, 28);
+    const nameLines = wrapPrinterText(item.product_name, 20);
     parts.push(
       BOLD_ON,
       DOUBLE_ON,
@@ -416,9 +425,9 @@ export function buildReceiptBytes(
   if (data.saleType !== 'dine_in') {
     parts.push(strBytes(padLine('Mode:', saleTypeReceiptLabels[data.saleType] ?? data.saleType)));
   }
-  parts.push(strBytes('-'.repeat(RECEIPT_WIDTH) + '\\n'));
+  parts.push(dashedLine());
   parts.push(strBytes(padColumns('Qte', 'Designation', 'P.U.', 'Total')));
-  parts.push(strBytes('-'.repeat(RECEIPT_WIDTH) + '\\n'));
+  parts.push(dashedLine());
 
   for (const item of data.items) {
     const nameLines = wrapPrinterText(item.product_name, RECEIPT_DESCRIPTION_WIDTH);
@@ -427,29 +436,31 @@ export function buildReceiptBytes(
       parts.push(strBytes(padColumns('', nameLine, '', '')));
     }
     if (item.variant_label) {
-      parts.push(strBytes(`  > ${printerSafeText(item.variant_label)}\\n`));
+      parts.push(strBytes(`  > ${printerSafeText(item.variant_label)}\n`));
     }
     if (item.sauces && item.sauces.length > 0) {
-      parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => printerSafeText(s.name)).join(', ')}\\n`));
+      parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => printerSafeText(s.name)).join(', ')}\n`));
     }
     if (item.flavors && item.flavors.length > 0) {
-      parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => printerSafeText(f.name)).join(', ')}\\n`));
+      parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => printerSafeText(f.name)).join(', ')}\n`));
     }
   }
 
-  parts.push(strBytes('-'.repeat(RECEIPT_WIDTH) + '\\n'));
+  parts.push(dashedLine());
   if (data.discountAmount > 0) {
     parts.push(strBytes(padLine('Sous-total', fmt(data.subtotal))));
     parts.push(strBytes(padLine('Remise', `- ${fmt(data.discountAmount)}`)));
   }
   parts.push(strBytes(padLine(`TVA (${settings.tax_rate}%)`, fmt(data.taxAmount))));
-  parts.push(solidLine(RECEIPT_WIDTH), BOLD_ON, line('TOTAL TTC'), CENTER, DOUBLE_ON, line(fmt(data.total)), DOUBLE_OFF, LEFT, BOLD_OFF, solidLine(RECEIPT_WIDTH));
+  parts.push(solidLine(RECEIPT_WIDTH));
+  parts.push(BOLD_ON, strBytes(padLine('TOTAL TTC', fmt(data.total))), BOLD_OFF);
+  parts.push(solidLine(RECEIPT_WIDTH));
 
   parts.push(BOLD_ON, line('MODE DE REGLEMENT'), BOLD_OFF);
   for (const p of data.payments) {
     parts.push(strBytes(padLine(`${paymentMethodLabels[p.method] ?? p.method}:`, fmt(p.amount))));
   }
-  parts.push(strBytes('-'.repeat(RECEIPT_WIDTH) + '\\n'));
+  parts.push(dashedLine());
 
   parts.push(CENTER, line(settings.receipt_footer || 'Merci de votre visite!'), line('A bientot.'), LEFT);
   parts.push(FEED(5), CUT);
