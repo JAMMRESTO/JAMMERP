@@ -68,11 +68,23 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
   }, [form.name]);
 
   function addVariant() {
-    if (!newVariant.trim()) return;
-    const price = newVariantPrice ? parseFloat(newVariantPrice) || undefined : undefined;
+    if (!newVariant.trim() || !newVariantPrice) return;
+    const price = parseFloat(newVariantPrice) || undefined;
+    if (price === undefined) return;
     setForm(f => ({ ...f, variants: [...f.variants, { label: newVariant.trim(), price }] }));
     setNewVariant('');
     setNewVariantPrice('');
+  }
+
+  const SUGGESTED_SIZES = ['Petite', 'Moyenne', 'Grande', 'Simple', 'Menu'];
+  const hasVariants = form.variants.length > 0;
+
+  function addSuggestedSize(label: string) {
+    setNewVariant(label);
+    setTimeout(() => {
+      const priceInput = document.getElementById('variant-price-input');
+      priceInput?.focus();
+    }, 0);
   }
 
   function removeVariant(i: number) {
@@ -263,31 +275,44 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
               />
             </div>
 
-            {/* Variants */}
+            {/* Tailles / Portions */}
             <div>
-              <label className="text-white/60 text-sm font-medium block mb-2">Variantes</label>
+              <label className="text-white/60 text-sm font-medium block mb-2">Tailles / Portions</label>
               <div className="flex gap-2 mb-2">
                 <input
                   type="text"
                   value={newVariant}
                   onChange={e => setNewVariant(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVariant(); } }}
-                  placeholder="Ex: Grande portion..."
+                  placeholder="Ex: Petite, Moyenne..."
                   className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
                 />
                 <input
+                  id="variant-price-input"
                   type="number"
                   value={newVariantPrice}
                   onChange={e => setNewVariantPrice(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVariant(); } }}
-                  placeholder="Prix"
+                  placeholder="Prix *"
                   min={0}
                   step={50}
                   className="w-24 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
                 />
-                <button type="button" onClick={addVariant} className="px-3 py-2 rounded-xl bg-white/8 hover:bg-blue-600/30 text-white/60 hover:text-white transition-all">
+                <button type="button" onClick={addVariant} disabled={!newVariant.trim() || !newVariantPrice} className="px-3 py-2 rounded-xl bg-white/8 hover:bg-blue-600/30 text-white/60 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed">
                   <Plus size={15} />
                 </button>
+              </div>
+              <div className="flex gap-1.5 mb-2">
+                {SUGGESTED_SIZES.map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => addSuggestedSize(s)}
+                    className="px-2.5 py-1 rounded-lg bg-blue-500/8 hover:bg-blue-500/20 border border-blue-500/15 hover:border-blue-500/30 text-blue-300 text-xs font-medium transition-all"
+                  >
+                    {s}
+                  </button>
+                ))}
               </div>
               {form.variants.length > 0 && (
                 <div className="space-y-1.5">
@@ -303,12 +328,13 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                         step={50}
                         className="w-20 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs text-right placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
                       />
+                      <span className="text-white/30 text-xs flex-shrink-0">{settings?.currency_symbol ?? ''}</span>
                       <button type="button" onClick={() => removeVariant(i)} className="text-blue-400/50 hover:text-red-400 transition-colors">
                         <X size={13} />
                       </button>
                     </div>
                   ))}
-                  <p className="text-white/25 text-[10px] mt-1">Laissez vide pour utiliser le prix par defaut ({form.price.toLocaleString('fr-FR')})</p>
+                  <p className="text-white/25 text-[10px] mt-1">Chaque taille doit avoir son propre prix. Le prix principal est facultatif quand le produit a des tailles.</p>
                 </div>
               )}
             </div>
@@ -323,18 +349,23 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-white/60 text-sm font-medium block mb-1.5">Prix de vente *</label>
+                  <label className="text-white/60 text-sm font-medium block mb-1.5">
+                    Prix de vente{hasVariants ? '' : ' *'}
+                  </label>
                   <input
                     type="number"
                     value={form.price || ''}
                     onChange={e => f('price', parseFloat(e.target.value) || 0)}
                     onFocus={e => e.target.select()}
-                    placeholder="0"
+                    placeholder={hasVariants ? 'Facultatif' : '0'}
                     min={0}
                     step={50}
-                    required
+                    required={!hasVariants}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white placeholder-white/25 text-sm focus:outline-none focus:border-blue-500/50 transition-all"
                   />
+                  {hasVariants && (
+                    <p className="text-white/30 text-[10px] mt-1">Facultatif si le produit a des tailles</p>
+                  )}
                 </div>
                 <div>
                   <label className="text-white/60 text-sm font-medium block mb-1.5">Coût de production</label>

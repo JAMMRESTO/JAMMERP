@@ -60,20 +60,20 @@ function VariantModal({ product, onSelect, onClose, sym }: VariantModalProps) {
           </div>
 
           {/* Variants */}
-          <div className="p-5 pt-4">
-            <p className="text-white/40 text-xs font-medium mb-3 uppercase tracking-wider">Choisir une variante</p>
-            <div className="flex flex-col gap-2">
+          <div className="p-5 pt-4 max-h-[55vh] overflow-y-auto">
+            <p className="text-white/40 text-xs font-medium mb-3 uppercase tracking-wider">Choisir une taille</p>
+            <div className="grid grid-cols-3 gap-2">
               {variants.map(v => {
                 const displayPrice = v.price ?? product.price;
                 return (
                   <motion.button
                     key={v.label}
-                    whileTap={{ scale: 0.98 }}
+                    whileTap={{ scale: 0.96 }}
                     onClick={() => { onSelect(v.label, v.price); onClose(); }}
-                    className="w-full px-4 py-3 rounded-2xl bg-white/5 hover:bg-blue-600/20 border border-white/10 hover:border-blue-500/40 text-white text-sm font-medium text-left transition-all flex items-center justify-between group"
+                    className="aspect-square rounded-2xl bg-white/5 hover:bg-blue-600/20 border border-white/10 hover:border-blue-500/40 text-white transition-all flex flex-col items-center justify-center gap-1 p-2 text-center"
                   >
-                    <span>{v.label}</span>
-                    <span className={`text-xs transition-colors ${v.price && v.price !== product.price ? 'text-amber-400 font-semibold' : 'text-white/20 group-hover:text-blue-400'}`}>
+                    <span className="text-sm font-medium leading-tight line-clamp-2 break-words">{v.label}</span>
+                    <span className="text-amber-400 text-xs font-semibold">
                       {displayPrice.toLocaleString('fr-FR')} {sym}
                     </span>
                   </motion.button>
@@ -526,9 +526,15 @@ function ProductCard({ product, categories }: ProductCardProps) {
       {/* Info */}
       <div className="px-1.5 py-1.5 flex-1 flex flex-col justify-between gap-0.5">
         <p className="text-white text-[11px] sm:text-xs font-medium leading-tight line-clamp-2">{product.name}</p>
-        <span className="text-blue-400 font-bold text-[11px] sm:text-xs">
-          {product.price.toLocaleString('fr-FR')} {settings.currency_symbol}
-        </span>
+        {hasVariants ? (
+          <span className="inline-flex items-center gap-0.5 text-blue-300/70 text-[9px] sm:text-[10px] font-medium bg-blue-500/10 border border-blue-500/20 rounded-md px-1.5 py-0.5 w-fit">
+            <ChevronDown size={9} /> Tailles
+          </span>
+        ) : (
+          <span className="text-blue-400 font-bold text-[11px] sm:text-xs">
+            {product.price.toLocaleString('fr-FR')} {settings.currency_symbol}
+          </span>
+        )}
       </div>
     </motion.div>
     </>
