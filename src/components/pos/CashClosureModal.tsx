@@ -4,7 +4,7 @@ import {
   X, Banknote, Smartphone, CreditCard, AlertTriangle,
   CheckCircle2, Loader2, TrendingUp, ShoppingBag,
   Lock, ChevronRight, ArrowUpRight, ArrowDownRight,
-  Receipt, Printer, Eye, ChevronDown, Clock
+  Receipt, Printer, Eye
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
@@ -20,15 +20,6 @@ interface SalesSummary {
   sales_count: number;
   by_method: Record<PaymentMethod, number>;
   by_category: { name: string; count: number; total: number }[];
-}
-
-interface PreviewSale {
-  id: string;
-  number: number;
-  total: number;
-  paid_at: string;
-  payment_method: PaymentMethod;
-  items: { name: string; quantity: number; variant: string; subtotal: number }[];
 }
 
 interface CashClosureModalProps {
@@ -110,9 +101,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [closedSession, setClosedSession] = useState<CashSession | null>(null);
-  const [previewSales, setPreviewSales] = useState<PreviewSale[]>([]);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [expandedSale, setExpandedSale] = useState<string | null>(null);
+
 
   useEffect(() => {
     async function loadSummary() {
@@ -168,53 +157,6 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
     }
     loadSummary();
   }, [openedAt, siteId]);
-
-  async function loadPreview() {
-    setPreviewLoading(true);
-    const { data: salesData } = await supabase
-      .from('sales')
-      .select('id, sale_number, total, paid_at')
-      .eq('site_id', siteId)
-      .eq('status', 'paid')
-      .gte('paid_at', openedAt)
-      .order('paid_at', { ascending: true });
-
-    const saleIds = (salesData ?? []).map(s => s.id);
-    if (saleIds.length === 0) {
-      setPreviewSales([]);
-      setPreviewLoading(false);
-      return;
-    }
-
-    const [{ data: paymentsData }, { data: itemsData }] = await Promise.all([
-      supabase.from('payments').select('sale_id, method').eq('site_id', siteId).in('sale_id', saleIds),
-      supabase.from('sale_items').select('sale_id, product_name, quantity, variant_label, subtotal').eq('site_id', siteId).in('sale_id', saleIds),
-    ]);
-
-    const methodBySale = new Map<string, PaymentMethod>();
-    for (const p of paymentsData ?? []) {
-      methodBySale.set(p.sale_id, p.method as PaymentMethod);
-    }
-
-    const itemsBySale = new Map<string, PreviewSale['items']>();
-    for (const it of itemsData ?? []) {
-      const arr = itemsBySale.get(it.sale_id) ?? [];
-      arr.push({ name: it.product_name, quantity: it.quantity, variant: it.variant_label ?? '', subtotal: it.subtotal });
-      itemsBySale.set(it.sale_id, arr);
-    }
-
-    const sales: PreviewSale[] = (salesData ?? []).map((s: any) => ({
-      id: s.id,
-      number: s.sale_number,
-      total: s.total,
-      paid_at: s.paid_at,
-      payment_method: methodBySale.get(s.id) ?? 'cash',
-      items: itemsBySale.get(s.id) ?? [],
-    }));
-
-    setPreviewSales(sales);
-    setPreviewLoading(false);
-  }
 
   const opening = parseFloat(openingBalance) || 0;
   const actual = parseFloat(actualCash) || 0;
@@ -420,7 +362,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                     )}
 
                     <div className="flex gap-2 mb-3">
-                      <button onClick={() => { loadPreview(); setStep('preview'); }}
+                      <button onClick={() => setStep('preview')}
                         className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white font-medium rounded-xl text-sm transition-all border border-white/8 hover:border-white/15">
                         <Eye size={14} /> Aperçu X
                       </button>
@@ -433,20 +375,12 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                   </motion.div>
                 )}
 
-                {/* STEP PREVIEW — Aperçu des ventes (X) */}
+                {/* STEP PREVIEW — Aperçu X de caisse */}
                 {step === 'preview' && (
                   <motion.div key="preview" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-white/60 text-xs">Aperçu des ventes — vérification avant clôture</p>
-                      <span className="text-white/40 text-[10px] font-medium">{previewSales.length} vente{previewSales.length !== 1 ? 's' : ''}</span>
-                    </div>
+                    <p className="text-white/60 text-xs mb-3">Aperçu X de caisse — résumé avant clôture</p>
 
-                    {previewLoading ? (
-                      <div className="flex flex-col items-center justify-center py-12 gap-3">
-                        <Loader2 size={20} className="text-amber-400 animate-spin" />
-                        <p className="text-white/40 text-xs">Chargement des ventes...</p>
-                      </div>
-                    ) : previewSales.length === 0 ? (
+                    {summary.sales_count === 0 ? (
                       <div className="flex flex-col items-center justify-center py-12 text-center">
                         <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-3">
                           <Receipt size={20} className="text-white/20" />
@@ -455,54 +389,71 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                         <p className="text-white/20 text-xs mt-1">Aucune commande payée durant cette session</p>
                       </div>
                     ) : (
-                      <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-                        {previewSales.map(sale => {
-                          const methodCfg = METHOD_CONFIG.find(m => m.id === sale.payment_method);
-                          const MethodIcon = methodCfg?.icon ?? Banknote;
-                          const methodColor = methodCfg?.color ?? 'text-white/50';
-                          const isExpanded = expandedSale === sale.id;
-                          return (
-                            <div key={sale.id} className="bg-white/3 rounded-xl border border-white/6 overflow-hidden">
-                              <button onClick={() => setExpandedSale(isExpanded ? null : sale.id)}
-                                className="w-full flex items-center justify-between p-3 hover:bg-white/5 transition-colors">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/8 flex items-center justify-center flex-shrink-0">
-                                    <MethodIcon size={13} className={methodColor} />
-                                  </div>
-                                  <div className="min-w-0 text-left">
-                                    <p className="text-white font-semibold text-xs">Vente #{String(sale.number).padStart(4, '0')}</p>
-                                    <div className="flex items-center gap-1.5">
-                                      <Clock size={9} className="text-white/30" />
-                                      <span className="text-white/40 text-[10px]">{new Date(sale.paid_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
-                                      <span className="text-white/25 text-[10px]">·</span>
-                                      <span className="text-white/40 text-[10px]">{sale.items.length} art.</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                  <span className="text-white font-bold text-sm">{fmt(sale.total, sym)}</span>
-                                  <ChevronDown size={14} className={`text-white/30 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                                </div>
-                              </button>
-                              {isExpanded && (
-                                <div className="px-3 pb-3 pt-1 space-y-1 border-t border-white/5">
-                                  {sale.items.map((item, i) => (
-                                    <div key={i} className="flex items-start justify-between gap-2 py-1">
-                                      <div className="flex items-start gap-1.5 min-w-0">
-                                        <span className="text-white/50 text-[10px] font-medium flex-shrink-0">{item.quantity}×</span>
-                                        <div className="min-w-0">
-                                          <p className="text-white/70 text-xs truncate">{item.name}</p>
-                                          {item.variant && <p className="text-white/30 text-[10px]">{item.variant}</p>}
-                                        </div>
-                                      </div>
-                                      <span className="text-white/50 text-[10px] font-medium flex-shrink-0">{fmt(item.subtotal, sym)}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                      <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+                        {/* Activité */}
+                        <div>
+                          <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Activité</p>
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
+                              <div className="flex items-center gap-2">
+                                <ShoppingBag size={13} className="text-white/40" />
+                                <span className="text-white/60 text-xs">Nombre de ventes</span>
+                              </div>
+                              <span className="text-white font-semibold text-sm">{summary.sales_count}</span>
                             </div>
-                          );
-                        })}
+                            <div className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
+                              <div className="flex items-center gap-2">
+                                <TrendingUp size={13} className="text-emerald-400" />
+                                <span className="text-white/60 text-xs">Chiffre d'affaires</span>
+                              </div>
+                              <span className="text-emerald-400 font-bold text-sm">{fmt(summary.total_sales, sym)}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Encaissements par mode de règlement */}
+                        <div>
+                          <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Encaissements</p>
+                          <div className="space-y-1.5">
+                            {METHOD_CONFIG.map(m => (
+                              <div key={m.id} className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
+                                <div className="flex items-center gap-2">
+                                  <m.icon size={13} className={m.color} />
+                                  <span className="text-white/60 text-xs">{m.label}</span>
+                                </div>
+                                <span className={`font-semibold text-sm ${summary.by_method[m.id] > 0 ? 'text-white' : 'text-white/25'}`}>
+                                  {fmt(summary.by_method[m.id], sym)}
+                                </span>
+                              </div>
+                            ))}
+                            <div className="flex items-center justify-between py-2 px-3 bg-amber-500/8 rounded-xl border border-amber-500/20">
+                              <span className="text-amber-300 text-xs font-semibold">Total encaissé</span>
+                              <span className="text-amber-300 font-bold text-sm">
+                                {fmt(summary.by_method.cash + summary.by_method.wave + summary.by_method.orange_money + summary.by_method.card, sym)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Ventes par catégorie */}
+                        {summary.by_category.length > 0 && (
+                          <div>
+                            <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Ventes par catégorie</p>
+                            <div className="space-y-1.5">
+                              {summary.by_category.map(cat => (
+                                <div key={cat.name} className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-white/70 text-xs truncate">{cat.name}</span>
+                                    <span className="text-white/25 text-[10px] flex-shrink-0">{cat.count} art.</span>
+                                  </div>
+                                  <span className="text-white font-semibold text-xs flex-shrink-0 ml-2">
+                                    {fmt(cat.total, sym)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
