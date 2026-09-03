@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { useTenant } from './TenantContext';
@@ -167,10 +167,13 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
     setIsPendingResume(false);
   }, []);
 
-  const subtotal = cart.reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
-  const taxAmount = Math.round((subtotal - discountAmount) * taxRate / 100);
-  const total = subtotal - discountAmount + taxAmount;
-  const itemCount = cart.reduce((sum, i) => sum + i.quantity, 0);
+  const { subtotal, taxAmount, total, itemCount } = useMemo(() => {
+    const sub = cart.reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
+    const tax = Math.round((sub - discountAmount) * taxRate / 100);
+    const tot = sub - discountAmount + tax;
+    const count = cart.reduce((sum, i) => sum + i.quantity, 0);
+    return { subtotal: sub, taxAmount: tax, total: tot, itemCount: count };
+  }, [cart, discountAmount, taxRate]);
 
   const completeSale = useCallback(async (
     payments: { method: PaymentMethod; amount: number; reference?: string }[]

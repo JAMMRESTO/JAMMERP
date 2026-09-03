@@ -289,29 +289,34 @@ export function Dashboard() {
         ? q.eq('site_id', siteIds[0])
         : q.in('site_id', siteIds);
 
-    const [todaySales, yestSales, weekSales, staleOrders, orders, lowProducts, lowIngredients, salesByUser, allUsers, todayExpenses, yestExpenses] = await Promise.all([
-      sf(supabase.from('sales').select('total, site_id')).eq('status','paid').gte('created_at', today+'T00:00:00').lte('created_at', today+'T23:59:59'),
-      sf(supabase.from('sales').select('total')).eq('status','paid').gte('created_at', yesterday+'T00:00:00').lte('created_at', yesterday+'T23:59:59'),
-      sf(supabase.from('sales').select('total, created_at, site_id')).eq('status','paid').gte('created_at', weekAgo+'T00:00:00'),
+    const [allSales, staleOrders, orders, lowProducts, lowIngredients, allUsers, allExpenses] = await Promise.all([
+      sf(supabase.from('sales').select('total, created_at, site_id, cashier_id')).eq('status','paid').gte('created_at', weekAgo+'T00:00:00'),
       sf(supabase.from('orders').select('id, order_number, status, created_at')).in('status',['pending','preparing']).lt('created_at', new Date(Date.now() - 20 * 60000).toISOString()).limit(5),
       sf(supabase.from('orders').select('id, order_number, status, order_type, notes, created_at')).in('status',['pending','preparing','ready']).order('created_at',{ ascending: false }).limit(5),
       sf(supabase.from('products').select('name, stock, low_stock_threshold')).eq('track_stock',true).gt('low_stock_threshold',0).limit(20),
       sf(supabase.from('ingredients').select('name, stock, low_stock_threshold')).eq('is_active',true).gt('low_stock_threshold',0).lte('stock',0).limit(10),
-      sf(supabase.from('sales').select('cashier_id, total, site_id')).eq('status','paid').gte('created_at', today+'T00:00:00').lte('created_at', today+'T23:59:59'),
       sf(supabase.from('users').select('id, name, avatar_url')).eq('is_active',true),
-      sf(supabase.from('expenses').select('amount')).gte('expense_date', today).lte('expense_date', today),
-      sf(supabase.from('expenses').select('amount')).gte('expense_date', yesterday).lte('expense_date', yesterday),
+      sf(supabase.from('expenses').select('amount, expense_date')).gte('expense_date', yesterday).lte('expense_date', today),
     ]);
 
+    // Split the single sales query into today / yesterday / week
+    const todayStart = today + 'T00:00:00';
+    const todayEnd   = today + 'T23:59:59';
+    const yestStart  = yesterday + 'T00:00:00';
+    const yestEnd    = yesterday + 'T23:59:59';
+    const allSalesData = allSales.data ?? [];
+    const todaySalesData = allSalesData.filter((s: {created_at: string}) => s.created_at >= todayStart && s.created_at <= todayEnd);
+    const yestSalesData  = allSalesData.filter((s: {created_at: string}) => s.created_at >= yestStart  && s.created_at <= yestEnd);
+
     // ─── Aggregated KPIs ───────────────────────────────────────
-    const todayRevenue = (todaySales.data ?? []).reduce((s, r: {total: number}) => s + r.total, 0);
-    const yestRevenue  = (yestSales.data ?? []).reduce((s, r: {total: number}) => s + r.total, 0);
-    const todayCount   = todaySales.data?.length ?? 0;
-    const yestCount    = yestSales.data?.length ?? 0;
+    const todayRevenue = todaySalesData.reduce((s, r: {total: number}) => s + r.total, 0);
+    const yestRevenue  = yestSalesData.reduce((s, r: {total: number}) => s + r.total, 0);
+    const todayCount   = todaySalesData.length;
+    const yestCount    = yestSalesData.length;
     const avgTicket    = todayCount > 0 ? Math.round(todayRevenue / todayCount) : 0;
     const yestAvg      = yestCount  > 0 ? Math.round(yestRevenue  / yestCount)  : 0;
-    const todayExpTotal = (todayExpenses.data ?? []).reduce((s, r: {amount: number}) => s + Number(r.amount), 0);
-    const yestExpTotal  = (yestExpenses.data ?? []).reduce((s, r: {amount: number}) => s + Number(r.amount), 0);
+    const todayExpTotal = (allExpenses.data ?? []).filter((e: {expense_date: string}) => e.expense_date === today).reduce((s, r: {amount: number}) => s + Number(r.amount), 0);
+    const yestExpTotal  = (allExpenses.data ?? []).filter((e: {expense_date: string}) => e.expense_date === yesterday).reduce((s, r: {amount: number}) => s + Number(r.amount), 0);
     const todayNet = todayRevenue - todayExpTotal;
     const yestNet  = yestRevenue - yestExpTotal;
 
@@ -326,7 +331,7 @@ export function Dashboard() {
     // ─── Per-site stats ────────────────────────────────────────
     if (isTenantOwnerView && isMultiSite) {
       const perSite: SiteStat[] = querySites.map(site => {
-        const siteSales = (todaySales.data ?? []).filter((s: {site_id: string}) => s.site_id === site.id);
+        const siteSales = todaySalesData.filter((s: {site_id: string}) => s.site_id === site.id);
         const siteRevenue = siteSales.reduce((s, r: {total: number}) => s + r.total, 0);
         const siteOrders  = siteSales.length;
         return {
@@ -341,7 +346,7 @@ export function Dashboard() {
       // Multi-site week data
       const mw: Record<string, Record<string, number>> = {};
       for (const site of querySites) mw[site.id] = {};
-      (weekSales.data ?? []).forEach((s: {total: number; created_at: string; site_id: string}) => {
+      (allSalesData as {total: number; created_at: string; site_id: string}[]).forEach((s) => {
         const d = new Date(s.created_at);
         const label = DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1];
         if (!mw[s.site_id]) mw[s.site_id] = {};
@@ -352,7 +357,7 @@ export function Dashboard() {
 
     // ─── Single-site week data ─────────────────────────────────
     const wMap: Record<string, number> = {};
-    (weekSales.data ?? []).forEach((s: {total: number; created_at: string}) => {
+    (allSalesData as {total: number; created_at: string}[]).forEach((s) => {
       const d = new Date(s.created_at);
       const label = DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1];
       wMap[label] = (wMap[label] ?? 0) + s.total;
@@ -384,7 +389,7 @@ export function Dashboard() {
 
     // ─── Revenue by cashier ────────────────────────────────────
     const userMap: Record<string, {revenue: number; count: number}> = {};
-    (salesByUser.data ?? []).forEach((s: {cashier_id: string | null; total: number}) => {
+    (todaySalesData as {cashier_id: string | null; total: number}[]).forEach((s) => {
       const key = s.cashier_id ?? '__unknown__';
       if (!userMap[key]) userMap[key] = { revenue: 0, count: 0 };
       userMap[key].revenue += s.total;
