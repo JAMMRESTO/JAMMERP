@@ -600,9 +600,9 @@ export function buildXReportBytes(
   parts.push(solidLine(RECEIPT_WIDTH));
 
   parts.push(LEFT);
-  parts.push(strBytes(padLine('Date', fmtDate(openedAt))));
-  parts.push(strBytes(padLine('Ouverture', fmtTime(openedAt))));
-  parts.push(strBytes(padLine('Fermeture', fmtTime(closedAt))));
+  parts.push(strBytes(padLine('Date', fmtDate(closedAt))));
+  parts.push(strBytes(padLine('Ouverture', `${fmtDate(openedAt)} ${fmtTime(openedAt)}`)));
+  parts.push(strBytes(padLine('Fermeture', `${fmtDate(closedAt)} ${fmtTime(closedAt)}`)));
   parts.push(strBytes(padLine('Caissier', data.cashierName)));
   parts.push(dashedLine());
 

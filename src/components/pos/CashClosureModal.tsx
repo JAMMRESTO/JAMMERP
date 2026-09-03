@@ -4,7 +4,7 @@ import {
   X, Banknote, Smartphone, CreditCard, AlertTriangle,
   CheckCircle2, Loader2, TrendingUp, ShoppingBag,
   Lock, ChevronRight, ArrowUpRight, ArrowDownRight,
-  Receipt, Printer
+  Receipt, Printer, Eye, ChevronDown, Clock
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
@@ -22,10 +22,20 @@ interface SalesSummary {
   by_category: { name: string; count: number; total: number }[];
 }
 
+interface PreviewSale {
+  id: string;
+  number: number;
+  total: number;
+  paid_at: string;
+  payment_method: PaymentMethod;
+  items: { name: string; quantity: number; variant: string; subtotal: number }[];
+}
+
 interface CashClosureModalProps {
   onClose: () => void;
   onClosed: (session: CashSession) => void;
   openedAt: string; // ISO — début de session
+  sessionId: string | null; // id de la session ouverte à clôturer
 }
 
 function fmt(n: number, sym: string) {
@@ -83,7 +93,7 @@ const METHOD_CONFIG: { id: PaymentMethod; label: string; icon: typeof Banknote; 
   { id: 'card', label: 'Carte', icon: CreditCard, color: 'text-violet-400' },
 ];
 
-export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureModalProps) {
+export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: CashClosureModalProps) {
   const { currentUser } = useAuth();
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
@@ -92,7 +102,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
   const { connected: printerConnected } = usePrinter();
   const { toast } = useToast();
 
-  const [step, setStep] = useState<'review' | 'count' | 'confirm' | 'done'>('review');
+  const [step, setStep] = useState<'review' | 'preview' | 'count' | 'confirm' | 'done'>('review');
   const [summary, setSummary] = useState<SalesSummary>({ total_sales: 0, sales_count: 0, by_method: { cash: 0, wave: 0, orange_money: 0, card: 0 }, by_category: [] });
   const [openingBalance, setOpeningBalance] = useState('');
   const [actualCash, setActualCash] = useState('');
@@ -100,6 +110,9 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [closedSession, setClosedSession] = useState<CashSession | null>(null);
+  const [previewSales, setPreviewSales] = useState<PreviewSale[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [expandedSale, setExpandedSale] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadSummary() {
@@ -156,6 +169,53 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
     loadSummary();
   }, [openedAt, siteId]);
 
+  async function loadPreview() {
+    setPreviewLoading(true);
+    const { data: salesData } = await supabase
+      .from('sales')
+      .select('id, sale_number, total, paid_at')
+      .eq('site_id', siteId)
+      .eq('status', 'paid')
+      .gte('paid_at', openedAt)
+      .order('paid_at', { ascending: true });
+
+    const saleIds = (salesData ?? []).map(s => s.id);
+    if (saleIds.length === 0) {
+      setPreviewSales([]);
+      setPreviewLoading(false);
+      return;
+    }
+
+    const [{ data: paymentsData }, { data: itemsData }] = await Promise.all([
+      supabase.from('payments').select('sale_id, method').eq('site_id', siteId).in('sale_id', saleIds),
+      supabase.from('sale_items').select('sale_id, product_name, quantity, variant_label, subtotal').eq('site_id', siteId).in('sale_id', saleIds),
+    ]);
+
+    const methodBySale = new Map<string, PaymentMethod>();
+    for (const p of paymentsData ?? []) {
+      methodBySale.set(p.sale_id, p.method as PaymentMethod);
+    }
+
+    const itemsBySale = new Map<string, PreviewSale['items']>();
+    for (const it of itemsData ?? []) {
+      const arr = itemsBySale.get(it.sale_id) ?? [];
+      arr.push({ name: it.product_name, quantity: it.quantity, variant: it.variant_label ?? '', subtotal: it.subtotal });
+      itemsBySale.set(it.sale_id, arr);
+    }
+
+    const sales: PreviewSale[] = (salesData ?? []).map((s: any) => ({
+      id: s.id,
+      number: s.sale_number,
+      total: s.total,
+      paid_at: s.paid_at,
+      payment_method: methodBySale.get(s.id) ?? 'cash',
+      items: itemsBySale.get(s.id) ?? [],
+    }));
+
+    setPreviewSales(sales);
+    setPreviewLoading(false);
+  }
+
   const opening = parseFloat(openingBalance) || 0;
   const actual = parseFloat(actualCash) || 0;
   const expectedCash = opening + summary.by_method.cash;
@@ -163,11 +223,10 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
 
   async function handleClose() {
     setSaving(true);
-    const { data } = await supabase.from('cash_sessions').insert({
-      cashier_id: currentUser?.id ?? null,
+    const closedAt = new Date().toISOString();
+    const payload = {
       closed_by: currentUser?.id ?? null,
-      opened_at: openedAt,
-      closed_at: new Date().toISOString(),
+      closed_at: closedAt,
       opening_balance: opening,
       expected_cash: expectedCash,
       actual_cash: actual,
@@ -180,8 +239,31 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
       sales_count: summary.sales_count,
       notes,
       status: 'closed',
-      site_id: siteId,
-    }).select().maybeSingle();
+    };
+
+    let data: CashSession | null = null;
+    if (sessionId) {
+      // Update the existing open session
+      const { data: updated } = await supabase
+        .from('cash_sessions')
+        .update(payload)
+        .eq('id', sessionId)
+        .eq('status', 'open')
+        .select()
+        .maybeSingle();
+      data = (updated as CashSession | null) ?? null;
+    }
+    if (!data) {
+      // Fallback: insert a new closed session (e.g. session was already closed)
+      const { data: inserted } = await supabase.from('cash_sessions').insert({
+        cashier_id: currentUser?.id ?? null,
+        closed_by: currentUser?.id ?? null,
+        opened_at: openedAt,
+        ...payload,
+        site_id: siteId,
+      }).select().maybeSingle();
+      data = (inserted as CashSession | null) ?? null;
+    }
 
     setSaving(false);
     if (data) {
@@ -337,9 +419,96 @@ export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureMod
                       </div>
                     )}
 
+                    <div className="flex gap-2 mb-3">
+                      <button onClick={() => { loadPreview(); setStep('preview'); }}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white font-medium rounded-xl text-sm transition-all border border-white/8 hover:border-white/15">
+                        <Eye size={14} /> Aperçu X
+                      </button>
+                    </div>
+
                     <button onClick={() => setStep('count')}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-sm transition-colors">
                       Continuer <ChevronRight size={15} />
+                    </button>
+                  </motion.div>
+                )}
+
+                {/* STEP PREVIEW — Aperçu des ventes (X) */}
+                {step === 'preview' && (
+                  <motion.div key="preview" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-white/60 text-xs">Aperçu des ventes — vérification avant clôture</p>
+                      <span className="text-white/40 text-[10px] font-medium">{previewSales.length} vente{previewSales.length !== 1 ? 's' : ''}</span>
+                    </div>
+
+                    {previewLoading ? (
+                      <div className="flex flex-col items-center justify-center py-12 gap-3">
+                        <Loader2 size={20} className="text-amber-400 animate-spin" />
+                        <p className="text-white/40 text-xs">Chargement des ventes...</p>
+                      </div>
+                    ) : previewSales.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-center">
+                        <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-3">
+                          <Receipt size={20} className="text-white/20" />
+                        </div>
+                        <p className="text-white/30 font-medium text-sm">Aucune vente</p>
+                        <p className="text-white/20 text-xs mt-1">Aucune commande payée durant cette session</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+                        {previewSales.map(sale => {
+                          const methodCfg = METHOD_CONFIG.find(m => m.id === sale.payment_method);
+                          const MethodIcon = methodCfg?.icon ?? Banknote;
+                          const methodColor = methodCfg?.color ?? 'text-white/50';
+                          const isExpanded = expandedSale === sale.id;
+                          return (
+                            <div key={sale.id} className="bg-white/3 rounded-xl border border-white/6 overflow-hidden">
+                              <button onClick={() => setExpandedSale(isExpanded ? null : sale.id)}
+                                className="w-full flex items-center justify-between p-3 hover:bg-white/5 transition-colors">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/8 flex items-center justify-center flex-shrink-0">
+                                    <MethodIcon size={13} className={methodColor} />
+                                  </div>
+                                  <div className="min-w-0 text-left">
+                                    <p className="text-white font-semibold text-xs">Vente #{String(sale.number).padStart(4, '0')}</p>
+                                    <div className="flex items-center gap-1.5">
+                                      <Clock size={9} className="text-white/30" />
+                                      <span className="text-white/40 text-[10px]">{new Date(sale.paid_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                      <span className="text-white/25 text-[10px]">·</span>
+                                      <span className="text-white/40 text-[10px]">{sale.items.length} art.</span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <span className="text-white font-bold text-sm">{fmt(sale.total, sym)}</span>
+                                  <ChevronDown size={14} className={`text-white/30 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                </div>
+                              </button>
+                              {isExpanded && (
+                                <div className="px-3 pb-3 pt-1 space-y-1 border-t border-white/5">
+                                  {sale.items.map((item, i) => (
+                                    <div key={i} className="flex items-start justify-between gap-2 py-1">
+                                      <div className="flex items-start gap-1.5 min-w-0">
+                                        <span className="text-white/50 text-[10px] font-medium flex-shrink-0">{item.quantity}×</span>
+                                        <div className="min-w-0">
+                                          <p className="text-white/70 text-xs truncate">{item.name}</p>
+                                          {item.variant && <p className="text-white/30 text-[10px]">{item.variant}</p>}
+                                        </div>
+                                      </div>
+                                      <span className="text-white/50 text-[10px] font-medium flex-shrink-0">{fmt(item.subtotal, sym)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <button onClick={() => setStep('review')}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 mt-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-sm transition-colors">
+                      Retour au résumé
                     </button>
                   </motion.div>
                 )}

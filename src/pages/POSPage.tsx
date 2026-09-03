@@ -90,36 +90,50 @@ function POSInner() {
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [showCashClosure, setShowCashClosure] = useState(false);
   const [sessionOpenedAt, setSessionOpenedAt] = useState<string>('');
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionVersion, setSessionVersion] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Load session opening time from the last closed session
+  // Find or create an open cash session for this site
   useEffect(() => {
-    async function loadSessionStart() {
+    async function ensureOpenSession() {
       if (!siteId) return;
-      const { data } = await supabase
+      // Look for an existing open session
+      const { data: existing } = await supabase
         .from('cash_sessions')
-        .select('closed_at')
+        .select('id, opened_at')
         .eq('site_id', siteId)
-        .eq('status', 'closed')
-        .order('closed_at', { ascending: false })
+        .eq('status', 'open')
+        .order('opened_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (data?.closed_at) {
-        setSessionOpenedAt(data.closed_at);
-        localStorage.setItem(`pos_session_opened_${siteId}`, data.closed_at);
-      } else {
-        // No prior session: use a far-back date to capture all sales
-        const fallback = '2020-01-01T00:00:00.000Z';
-        setSessionOpenedAt(fallback);
-        localStorage.setItem(`pos_session_opened_${siteId}`, fallback);
+      if (existing) {
+        setActiveSessionId(existing.id);
+        setSessionOpenedAt(existing.opened_at);
+        return;
+      }
+
+      // No open session — create one now with the real opening time
+      const now = new Date().toISOString();
+      const { data: created } = await supabase
+        .from('cash_sessions')
+        .insert({
+          site_id: siteId,
+          cashier_id: currentUser?.id ?? null,
+          opened_at: now,
+          status: 'open',
+        })
+        .select('id, opened_at')
+        .maybeSingle();
+
+      if (created) {
+        setActiveSessionId(created.id);
+        setSessionOpenedAt(created.opened_at);
       }
     }
-    // Try localStorage first for instant display, then validate from DB
-    const cached = siteId ? localStorage.getItem(`pos_session_opened_${siteId}`) : null;
-    if (cached) setSessionOpenedAt(cached);
-    loadSessionStart();
-  }, [siteId]);
+    ensureOpenSession();
+  }, [siteId, currentUser?.id, sessionVersion]);
 
   const loadData = useCallback(async () => {
     if (!siteId) return;
@@ -602,13 +616,13 @@ function POSInner() {
       <AnimatePresence>
         {showCashClosure && sessionOpenedAt && (
           <CashClosureModal
+            sessionId={activeSessionId}
             openedAt={sessionOpenedAt}
             onClose={() => setShowCashClosure(false)}
             onClosed={(_session: CashSession) => {
               setShowCashClosure(false);
-              const now = new Date().toISOString();
-              setSessionOpenedAt(now);
-              if (siteId) localStorage.setItem(`pos_session_opened_${siteId}`, now);
+              setActiveSessionId(null);
+              setSessionVersion(v => v + 1);
             }}
           />
         )}
