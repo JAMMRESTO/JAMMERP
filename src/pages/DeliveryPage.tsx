@@ -5,9 +5,12 @@ import {
   MapPin, Clock, CheckCircle2, XCircle, Bike,
   ArrowRight, Edit3, Trash2, DollarSign, TrendingUp,
   RefreshCw, Search, Filter, Wallet, Package,
-  AlertCircle, ChevronDown
+  AlertCircle, ChevronDown, Printer, Loader2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { printDeliveryTicket, type EscposDeliveryData } from '../lib/escpos';
+import { buildDeliveryTicketHtml, printViaIframe } from '../lib/printUtils';
+import { usePrinter } from '../context/PrinterContext';
 import { useTenant } from '../context/TenantContext';
 import { useToast } from '../components/ui/Toast';
 import { useSettings } from '../context/SettingsContext';
@@ -675,10 +678,12 @@ interface DeliveryRowProps {
   drivers: Driver[];
   onAssign: () => void;
   onStatusChange: (id: string, status: DeliveryStatus) => void;
+  onPrint: (delivery: DeliveryWithDriver) => void;
+  printing: boolean;
   sym: string;
 }
 
-function DeliveryRow({ delivery, drivers, onAssign, onStatusChange, sym }: DeliveryRowProps) {
+function DeliveryRow({ delivery, drivers, onAssign, onStatusChange, onPrint, printing, sym }: DeliveryRowProps) {
   const cfg = deliveryStatusConfig[delivery.status];
 
   return (
@@ -730,6 +735,16 @@ function DeliveryRow({ delivery, drivers, onAssign, onStatusChange, sym }: Deliv
         )}
       </div>
 
+      <button
+        onClick={() => onPrint(delivery)}
+        disabled={printing}
+        className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs border bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:bg-white/10 transition-all disabled:opacity-40"
+        title="Imprimer le bon de livraison"
+      >
+        {printing ? <Loader2 size={11} className="animate-spin" /> : <Printer size={11} />}
+        <span className="hidden sm:inline">Imprimer</span>
+      </button>
+
       {cfg.next && delivery.status !== 'delivered' && delivery.status !== 'cancelled' && (
         <button
           onClick={() => onStatusChange(delivery.id, cfg.next!)}
@@ -754,6 +769,7 @@ export function DeliveryPage() {
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
   const { settings } = useSettings();
+  const { connected: printerConnected } = usePrinter();
   const sym = settings.currency_symbol;
 
   const [tab, setTab] = useState<PageTab>('active');
@@ -768,6 +784,7 @@ export function DeliveryPage() {
   const [assigningDelivery, setAssigningDelivery] = useState<Delivery | null>(null);
   const [paymentDriver, setPaymentDriver] = useState<Driver | null>(null);
   const [search, setSearch] = useState('');
+  const [printingDeliveryId, setPrintingDeliveryId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -812,6 +829,29 @@ export function DeliveryPage() {
     await supabase.from('drivers').update({ is_active: false }).eq('id', id).eq('site_id', siteId);
     setDrivers(prev => prev.filter(d => d.id !== id));
     toast('success', 'Livreur désactivé');
+  }
+
+  async function handlePrintDelivery(delivery: DeliveryWithDriver) {
+    if (printingDeliveryId) return;
+    setPrintingDeliveryId(delivery.id);
+    const data: EscposDeliveryData = {
+      deliveryNumber: delivery.delivery_number,
+      createdAt: delivery.created_at,
+      customerName: delivery.customer_name,
+      customerPhone: delivery.customer_phone,
+      deliveryAddress: delivery.delivery_address,
+      deliveryFee: delivery.delivery_fee,
+      notes: delivery.notes,
+      driverName: delivery.driver?.name ?? null,
+      status: delivery.status,
+    };
+    if (printerConnected) {
+      const ok = await printDeliveryTicket(data, settings);
+      if (!ok) toast('error', 'Echec de l’impression');
+    } else {
+      printViaIframe(buildDeliveryTicketHtml(data, settings));
+    }
+    setPrintingDeliveryId(null);
   }
 
   async function handleDeliveryStatus(id: string, status: DeliveryStatus) {
@@ -1012,7 +1052,9 @@ export function DeliveryPage() {
                       delivery={d}
                       drivers={drivers}
                       sym={sym}
+                      printing={printingDeliveryId === d.id}
                       onAssign={() => setAssigningDelivery(d)}
+                      onPrint={handlePrintDelivery}
                       onStatusChange={handleDeliveryStatus}
                     />
                   ))}

@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Receipt, Loader2, Utensils, Package, Truck, Ban, CheckCircle2 } from 'lucide-react';
+import { X, Receipt, Loader2, Utensils, Package, Truck, Ban, CheckCircle2, Printer } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
+import { usePrinter } from '../../context/PrinterContext';
+import { useToast } from '../ui/Toast';
 import { AdminPinModal } from './AdminPinModal';
-import type { Sale, UserWithRole } from '../../types/database';
+import { printCancelledReceipt, type EscposCancelledReceiptData } from '../../lib/escpos';
+import { buildCancelledReceiptHtml, printViaIframe } from '../../lib/printUtils';
+import type { Sale, SaleItem, Payment, UserWithRole } from '../../types/database';
 
 const saleTypeLabels: Record<string, { label: string; icon: typeof Utensils; color: string }> = {
   dine_in:  { label: 'Sur place',        icon: Utensils, color: 'text-blue-400' },
@@ -29,12 +33,15 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
   const siteId = currentSite?.id ?? null;
   const { cancelSale } = usePOS();
   const { settings } = useSettings();
+  const { connected: printerConnected } = usePrinter();
+  const { toast } = useToast();
   const sym = settings.currency_symbol;
 
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelTarget, setCancelTarget] = useState<Sale | null>(null);
   const [cancelSuccess, setCancelSuccess] = useState<string | null>(null);
+  const [printingId, setPrintingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadSales();
@@ -68,6 +75,57 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
       setTimeout(() => setCancelSuccess(null), 2000);
     }
     setCancelTarget(null);
+  }
+
+  async function handlePrintCancelled(sale: Sale) {
+    setPrintingId(sale.id);
+    try {
+      const [itemsRes, paymentsRes] = await Promise.all([
+        supabase.from('sale_items').select('*').eq('sale_id', sale.id).eq('site_id', siteId),
+        supabase.from('payments').select('*').eq('sale_id', sale.id).eq('site_id', siteId),
+      ]);
+      const items = (itemsRes.data ?? []) as SaleItem[];
+      const payments = (paymentsRes.data ?? []) as Payment[];
+
+      const receiptData: EscposCancelledReceiptData = {
+        saleNumber: sale.sale_number.toString(),
+        createdAt: sale.created_at,
+        saleType: sale.sale_type,
+        tableNumber: sale.table_number || null,
+        cashierName: sale.customer_name || null,
+        customerName: sale.customer_name || null,
+        items: items.map(i => ({
+          quantity: i.quantity,
+          product_name: i.product_name,
+          unit_price: i.unit_price,
+          subtotal: i.subtotal,
+          variant_label: i.variant_label || null,
+          sauces: i.sauces ?? [],
+          flavors: i.flavors ?? [],
+        })),
+        payments: payments.map(p => ({ method: p.method, amount: p.amount })),
+        subtotal: sale.subtotal,
+        taxAmount: sale.tax_amount,
+        discountAmount: sale.discount_amount,
+        total: sale.total,
+        cancelledByName: sale.cancelled_by_name || null,
+        cancelledAt: sale.cancelled_at || null,
+        cancelReason: sale.cancel_reason || null,
+      };
+
+      if (printerConnected) {
+        const ok = await printCancelledReceipt(receiptData, settings);
+        if (!ok) {
+          toast('error', 'Erreur impression ticket annule');
+        }
+      } else {
+        const html = buildCancelledReceiptHtml(receiptData, settings);
+        printViaIframe(html);
+      }
+    } catch {
+      toast('error', 'Erreur lors de la recuperation du ticket');
+    }
+    setPrintingId(null);
   }
 
   function formatTime(iso: string) {
@@ -188,6 +246,22 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
                         >
                           <Ban size={13} />
                           <span className="hidden sm:inline">Annuler</span>
+                        </motion.button>
+                      )}
+
+                      {/* Print cancelled ticket button */}
+                      {isCancelled && (
+                        <motion.button
+                          onClick={() => handlePrintCancelled(sale)}
+                          disabled={printingId === sale.id}
+                          whileTap={{ scale: 0.95 }}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white/60 hover:text-white/90 text-xs font-medium transition-all flex-shrink-0 disabled:opacity-40"
+                        >
+                          {printingId === sale.id
+                            ? <Loader2 size={13} className="animate-spin" />
+                            : <Printer size={13} />
+                          }
+                          <span className="hidden sm:inline">Ticket</span>
                         </motion.button>
                       )}
 

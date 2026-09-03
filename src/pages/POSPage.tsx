@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive } from 'lucide-react';
+import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
 import { printCombined, printReceipt, openCashDrawer, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
@@ -17,6 +17,7 @@ import { ReceiptModal } from '../components/pos/ReceiptModal';
 import { TablePickerModal } from '../components/pos/TablePickerModal';
 import { CustomerPickerModal } from '../components/pos/CustomerPickerModal';
 import { PendingTicketsModal } from '../components/pos/PendingTicketsModal';
+import { SalesHistoryModal } from '../components/pos/SalesHistoryModal';
 import { CashClosureModal } from '../components/pos/CashClosureModal';
 import { useToast } from '../components/ui/Toast';
 import type { Category, Product, SaleType, CashSession } from '../types/database';
@@ -86,6 +87,7 @@ function POSInner() {
   const [showTablePicker, setShowTablePicker] = useState(false);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [showPendingTickets, setShowPendingTickets] = useState(false);
+  const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [showCashClosure, setShowCashClosure] = useState(false);
   const [sessionOpenedAt, setSessionOpenedAt] = useState<string>('');
   const [pendingCount, setPendingCount] = useState(0);
@@ -301,6 +303,17 @@ function POSInner() {
               {pendingCount}
             </span>
           )}
+        </button>
+
+        {/* Sales history button */}
+        <button
+          onClick={() => setShowSalesHistory(true)}
+          className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-[10px] sm:text-xs font-medium transition-all flex-shrink-0 bg-white/4 border-white/10 text-white/50 hover:text-white/80 hover:border-white/20"
+          title="Historique des ventes"
+        >
+          <Receipt size={12} className="sm:hidden" />
+          <Receipt size={13} className="hidden sm:block" />
+          <span className="hidden sm:inline">Historique</span>
         </button>
 
         {/* Cash drawer button */}
@@ -566,6 +579,12 @@ function POSInner() {
             onClose={() => setShowPendingTickets(false)}
             onResumed={handlePendingResumed}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSalesHistory && (
+          <SalesHistoryModal onClose={() => setShowSalesHistory(false)} />
         )}
       </AnimatePresence>
 

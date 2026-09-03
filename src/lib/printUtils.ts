@@ -476,3 +476,107 @@ export function buildCombinedKitchenAndReceiptHtml(
 ${receiptBody}`;
   return wrapThermalDoc(`Ticket #${receipt.saleNumber}`, combined);
 }
+
+// ─── Cancelled receipt HTML ───
+
+export interface CancelledReceiptData extends SaleReceiptData {
+  cancelledByName?: string | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
+}
+
+export function buildCancelledReceiptHtml(
+  data: CancelledReceiptData,
+  settings: SaleReceiptSettings
+): string {
+  const bannerLines: string[] = [
+    `<div class="banner" style="background:#000;color:#fff;font-size:14px;letter-spacing:2px;padding:5px 0;">*** ANNULÉ ***</div>`,
+  ];
+  if (data.cancelReason) {
+    bannerLines.push(`<div class="row"><span class="lbl" style="font-weight:700;">Motif :</span><span class="val">${esc(data.cancelReason)}</span></div>`);
+  }
+  if (data.cancelledByName) {
+    bannerLines.push(`<div class="row"><span class="lbl" style="font-weight:700;">Annulé par :</span><span class="val">${esc(data.cancelledByName)}</span></div>`);
+  }
+  if (data.cancelledAt) {
+    const cancelTime = new Date(data.cancelledAt).toLocaleString('fr-FR');
+    bannerLines.push(`<div class="row"><span class="lbl" style="font-weight:700;">Le :</span><span class="val">${esc(cancelTime)}</span></div>`);
+  }
+  bannerLines.push(`<hr class="sep">`);
+
+  const receiptBody = buildSaleReceiptBody(data, settings);
+  const combined = `${bannerLines.join('\n')}\n${receiptBody}`;
+  return wrapThermalDoc(`Ticket ANNULÉ #${data.saleNumber}`, combined);
+}
+
+// ─── Delivery ticket HTML ───
+
+export interface DeliveryTicketData {
+  deliveryNumber: number;
+  createdAt: string;
+  customerName: string;
+  customerPhone?: string | null;
+  deliveryAddress: string;
+  deliveryFee: number;
+  notes?: string | null;
+  driverName?: string | null;
+  status: string;
+}
+
+export type DeliveryTicketSettings = Pick<
+  SaleReceiptSettings,
+  'restaurant_name' | 'address' | 'phone' | 'currency_symbol'
+>;
+
+const deliveryStatusLabels: Record<string, string> = {
+  pending: 'EN ATTENTE DE PAIEMENT',
+  assigned: 'ASSIGNÉE',
+  picked_up: 'EN ROUTE',
+  delivered: 'LIVRÉE',
+  cancelled: 'ANNULÉE',
+};
+
+export function buildDeliveryTicketHtml(
+  data: DeliveryTicketData,
+  settings: DeliveryTicketSettings
+): string {
+  const sym = settings.currency_symbol;
+  const fmt = (n: number) => fmtAmt(n, sym);
+
+  const dateObj = new Date(data.createdAt);
+  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const row = (left: string, right: string, large = false) =>
+    `<div class="row${large ? ' total-row' : ''}"><span class="lbl">${esc(left)}</span><span class="val">${esc(right)}</span></div>`;
+
+  const headerHtml = buildThermalHeader(settings);
+
+  const bodyHtml = [
+    headerHtml,
+    `<div class="banner">BON DE LIVRAISON</div>`,
+    row(`N° : ${data.deliveryNumber}`, ''),
+    row(`Date : ${dateStr}`, `Heure : ${timeStr}`),
+    `<hr class="sep">`,
+    `<div class="section-title">CLIENT</div>`,
+    `<div style="font-size:13px;font-weight:700;">${esc(data.customerName)}</div>`,
+    ...(data.customerPhone ? [`<div style="font-size:11px;">Tél : ${esc(data.customerPhone)}</div>`] : []),
+    `<hr class="sep">`,
+    `<div class="section-title">ADRESSE</div>`,
+    `<div style="font-size:12px;font-weight:700;">${esc(data.deliveryAddress)}</div>`,
+    `<hr class="sep">`,
+    ...(data.driverName ? [row('Livreur :', data.driverName)] : []),
+    row('Statut :', deliveryStatusLabels[data.status] ?? data.status),
+    `<hr class="sep">`,
+    row('Frais de livraison :', fmt(data.deliveryFee), true),
+    `<hr class="sep-solid">`,
+    ...(data.notes && data.notes.trim() ? [
+      `<div class="section-title">NOTES</div>`,
+      `<div style="font-size:12px;font-weight:700;">${esc(data.notes)}</div>`,
+      `<hr class="sep">`,
+    ] : []),
+    `<div class="footer">--- Bon de livraison ---</div>`,
+  ].join('\n');
+
+  return wrapThermalDoc(`Bon de livraison #${data.deliveryNumber}`, bodyHtml);
+}

@@ -665,3 +665,147 @@ export async function printXReport(
   const bytes = buildXReportBytes(data, settings);
   return sendBytes(bytes);
 }
+
+// ─── Cancelled receipt ticket ───
+
+export interface EscposCancelledReceiptData extends EscposReceiptData {
+  cancelledByName?: string | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
+}
+
+export function buildCancelledReceiptBytes(
+  data: EscposCancelledReceiptData,
+  settings: EscposReceiptSettings
+): Uint8Array {
+  const receiptBytes = buildReceiptBytes(data, settings);
+  const bannerParts: Uint8Array[] = [
+    INIT,
+    CENTER,
+    BOLD_ON,
+    DOUBLE_ON,
+    line('*** ANNULE ***'),
+    DOUBLE_OFF,
+    BOLD_OFF,
+    LEFT,
+  ];
+  if (data.cancelReason) {
+    bannerParts.push(BOLD_ON, line(`Motif: ${data.cancelReason}`), BOLD_OFF);
+  }
+  if (data.cancelledByName) {
+    bannerParts.push(line(`Annule par: ${data.cancelledByName}`));
+  }
+  if (data.cancelledAt) {
+    const cancelTime = new Date(data.cancelledAt).toLocaleString('fr-FR');
+    bannerParts.push(line(`Le: ${cancelTime}`));
+  }
+  bannerParts.push(dashedLine());
+  return concat(...bannerParts, receiptBytes);
+}
+
+export async function printCancelledReceipt(
+  data: EscposCancelledReceiptData,
+  settings: EscposReceiptSettings
+): Promise<boolean> {
+  const bytes = buildCancelledReceiptBytes(data, settings);
+  return sendBytes(bytes);
+}
+
+// ─── Delivery ticket ───
+
+export interface EscposDeliveryData {
+  deliveryNumber: number;
+  createdAt: string;
+  customerName: string;
+  customerPhone?: string | null;
+  deliveryAddress: string;
+  deliveryFee: number;
+  notes?: string | null;
+  driverName?: string | null;
+  status: string;
+}
+
+export interface EscposDeliverySettings {
+  restaurant_name: string;
+  address?: string;
+  phone?: string;
+  currency_symbol: string;
+}
+
+export function buildDeliveryTicketBytes(
+  data: EscposDeliveryData,
+  settings: EscposDeliverySettings
+): Uint8Array {
+  const sym = printerSafeText(settings.currency_symbol);
+  const fmtNumber = (n: number) => printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
+  const fmt = (n: number) => `${fmtNumber(n)} ${sym}`;
+
+  const dateObj = new Date(data.createdAt);
+  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const statusLabels: Record<string, string> = {
+    pending: 'EN ATTENTE DE PAIEMENT',
+    assigned: 'ASSIGNEE',
+    picked_up: 'EN ROUTE',
+    delivered: 'LIVREE',
+    cancelled: 'ANNULEE',
+  };
+
+  const parts: Uint8Array[] = [INIT, CENTER];
+
+  parts.push(
+    BOLD_ON,
+    LARGE_ON,
+    line(settings.restaurant_name.toUpperCase()),
+    LARGE_OFF,
+    BOLD_OFF,
+  );
+  if (settings.address) parts.push(line(settings.address));
+  if (settings.phone) parts.push(line(`Tel: ${settings.phone}`));
+  parts.push(LEFT, solidLine(RECEIPT_WIDTH));
+
+  parts.push(BOLD_ON, DOUBLE_ON, line('BON DE LIVRAISON'), DOUBLE_OFF, BOLD_OFF);
+  parts.push(line(`N: ${data.deliveryNumber}`));
+  parts.push(line(`${dateStr} ${timeStr}`));
+  parts.push(dashedLine());
+
+  parts.push(BOLD_ON, line('CLIENT'), BOLD_OFF);
+  parts.push(line(data.customerName));
+  if (data.customerPhone) parts.push(line(`Tel: ${data.customerPhone}`));
+  parts.push(dashedLine());
+
+  parts.push(BOLD_ON, line('ADRESSE'), BOLD_OFF);
+  const addrLines = wrapPrinterText(data.deliveryAddress, RECEIPT_WIDTH);
+  for (const l of addrLines) parts.push(line(l));
+  parts.push(dashedLine());
+
+  if (data.driverName) {
+    parts.push(strBytes(padLine('Livreur:', data.driverName)));
+  }
+
+  parts.push(strBytes(padLine('Statut:', statusLabels[data.status] ?? data.status)));
+  parts.push(dashedLine());
+
+  parts.push(BOLD_ON, strBytes(padLine('Frais de livraison:', fmt(data.deliveryFee))), BOLD_OFF);
+  parts.push(solidLine(RECEIPT_WIDTH));
+
+  if (data.notes && data.notes.trim()) {
+    parts.push(BOLD_ON, line('NOTES'), BOLD_OFF);
+    const noteLines = wrapPrinterText(data.notes, RECEIPT_WIDTH);
+    for (const l of noteLines) parts.push(line(l));
+    parts.push(dashedLine());
+  }
+
+  parts.push(CENTER, line('--- Bon de livraison ---'), LEFT);
+  parts.push(FEED(5), CUT);
+  return concat(...parts);
+}
+
+export async function printDeliveryTicket(
+  data: EscposDeliveryData,
+  settings: EscposDeliverySettings
+): Promise<boolean> {
+  const bytes = buildDeliveryTicketBytes(data, settings);
+  return sendBytes(bytes);
+}
