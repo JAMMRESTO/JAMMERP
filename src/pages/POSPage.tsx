@@ -444,7 +444,7 @@ function POSInner() {
           </div>
           {/* Extra bottom padding on mobile so products aren't hidden behind cart bar */}
           <div className={`flex-1 overflow-y-auto px-3 sm:px-4 scrollbar-thin ${itemCount > 0 ? 'pb-24 lg:pb-4' : 'pb-3 sm:pb-4'}`}>
-            <ProductGrid products={filteredProducts} categories={categories} loading={loading} />
+            <ProductGrid products={filteredProducts} categories={categories} loading={loading} allProducts={products} />
           </div>
         </div>
 

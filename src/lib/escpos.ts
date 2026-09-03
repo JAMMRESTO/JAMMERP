@@ -810,17 +810,14 @@ export async function printDeliveryTicket(
   return sendBytes(bytes);
 }
 
-// ─── Drink category filter for kitchen tickets ───
+// ─── Kitchen ticket items ───
+// All items (including drinks) are sent to the kitchen ticket — the kitchen prepares everything.
 
 export function filterKitchenCartItems<T extends { product: { category_id: string | null } }>(
   items: T[],
-  categories: { id: string; name: string }[]
+  _categories: { id: string; name: string }[]
 ): T[] {
-  const drinkIds = new Set(
-    categories.filter(c => /boisson/i.test(c.name)).map(c => c.id)
-  );
-  if (drinkIds.size === 0) return items;
-  return items.filter(item => !drinkIds.has(item.product.category_id ?? ''));
+  return items;
 }
 
 // ─── Deferred receipt (pending payment) ───

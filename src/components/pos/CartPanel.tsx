@@ -154,7 +154,7 @@ export function CartPanel({ onCheckout, categories }: CartPanelProps) {
     if (cart.length === 0) return;
     const kitchenCart = filterKitchenCartItems(cart, categories);
     if (kitchenCart.length === 0) {
-      toast('info', 'Rien a imprimer pour la cuisine (boissons uniquement)');
+      toast('info', 'Panier vide');
       return;
     }
     const kitchenData: EscposKitchenData = {
