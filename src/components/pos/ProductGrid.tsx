@@ -582,7 +582,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
       return;
     }
     finalize(v.label, v.price, [], []);
-    flushPendingDrink();
+    flushPendingDrink(drink, drinkVariant);
   }
 
   function handleSaucesConfirm(selected: SelectedSauce[]) {
@@ -595,7 +595,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
     const v = pendingVariant ?? { label: '', price: undefined };
     setPendingVariant(null);
     finalize(v.label, v.price, selected, []);
-    flushPendingDrink();
+    flushPendingDrink(pendingDrink, pendingDrinkVariant);
   }
 
   function handleFlavorsConfirm(selected: SelectedFlavor[]) {
@@ -604,12 +604,12 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
     setPendingVariant(null);
     setPendingSauces([]);
     finalize(v.label, v.price, pendingSauces, selected);
-    flushPendingDrink();
+    flushPendingDrink(pendingDrink, pendingDrinkVariant);
   }
 
-  function flushPendingDrink() {
-    if (pendingDrink) {
-      addToCart(pendingDrink, pendingDrinkVariant ? `${pendingDrinkVariant} - Inclus menu` : 'Inclus menu', 0, [], []);
+  function flushPendingDrink(drink: Product | null, drinkVariant: string) {
+    if (drink) {
+      addToCart(drink, drinkVariant ? `${drinkVariant} - Inclus menu` : 'Inclus menu', 0, [], []);
       setPendingDrink(null);
       setPendingDrinkVariant('');
     }
