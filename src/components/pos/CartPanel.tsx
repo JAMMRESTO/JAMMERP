@@ -8,9 +8,10 @@ import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
 import { buildKitchenTicketHtml, printViaIframe } from '../../lib/printUtils';
-import { printKitchenTicket, type EscposKitchenData } from '../../lib/escpos';
+import { printKitchenTicket, filterKitchenCartItems, type EscposKitchenData } from '../../lib/escpos';
 import { usePrinter } from '../../context/PrinterContext';
-import type { CartItem, SaleType } from '../../types/database';
+import { useToast } from '../ui/Toast';
+import type { CartItem, Category, SaleType } from '../../types/database';
 
 function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
   const { removeFromCart, updateQuantity, updateKitchenNote } = usePOS();
@@ -132,9 +133,10 @@ const saleTypeKitchenLabel: Record<SaleType, string> = {
 
 interface CartPanelProps {
   onCheckout: () => void;
+  categories: Category[];
 }
 
-export function CartPanel({ onCheckout }: CartPanelProps) {
+export function CartPanel({ onCheckout, categories }: CartPanelProps) {
   const {
     cart, saleType, tableNumber, customerName, selectedCustomer,
     discountAmount,
@@ -145,17 +147,23 @@ export function CartPanel({ onCheckout }: CartPanelProps) {
   const { settings } = useSettings();
   const { currentUser } = useAuth();
   const { connected: printerConnected } = usePrinter();
+  const { toast } = useToast();
   const sym = settings.currency_symbol;
 
   function handlePrintKitchen() {
     if (cart.length === 0) return;
+    const kitchenCart = filterKitchenCartItems(cart, categories);
+    if (kitchenCart.length === 0) {
+      toast('info', 'Rien a imprimer pour la cuisine (boissons uniquement)');
+      return;
+    }
     const kitchenData: EscposKitchenData = {
       createdAt: new Date().toISOString(),
       saleType,
       tableNumber,
       customerName: selectedCustomer?.name || customerName,
       orderNotes,
-      items: cart.map(item => ({
+      items: kitchenCart.map(item => ({
         quantity: item.quantity,
         product_name: item.product.name,
         variant_label: item.variant_label,

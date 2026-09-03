@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
-import { printCombined, printReceipt, openCashDrawer, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
+import { printCombined, printReceipt, openCashDrawer, filterKitchenCartItems, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
@@ -193,13 +193,14 @@ function POSInner() {
         discountAmount,
         total: usePOSTotal,
       };
+      const kitchenItems = filterKitchenCartItems(cart, categories);
       const kitchenData: EscposKitchenData = {
         createdAt: result.sale.created_at,
         saleType,
         tableNumber,
         customerName: selectedCustomer ? selectedCustomer.name : customerName,
         orderNotes,
-        items: cart.map(item => ({
+        items: kitchenItems.map(item => ({
           quantity: item.quantity,
           product_name: item.product.name,
           variant_label: item.variant_label,
@@ -210,7 +211,11 @@ function POSInner() {
       };
 
       if (settings.print_kitchen_with_receipt) {
-        printCombined(kitchenData, receiptData, settings);
+        if (kitchenItems.length > 0) {
+          printCombined(kitchenData, receiptData, settings);
+        } else {
+          printReceipt(receiptData, settings);
+        }
       } else {
         printReceipt(receiptData, settings);
       }
@@ -445,7 +450,7 @@ function POSInner() {
 
         {/* Right: cart panel (desktop only) */}
         <div className="hidden lg:block w-72 xl:w-80 flex-shrink-0">
-          <CartPanel onCheckout={() => setShowPayment(true)} />
+          <CartPanel categories={categories} onCheckout={() => setShowPayment(true)} />
         </div>
       </div>
 
@@ -536,7 +541,7 @@ function POSInner() {
                 <div className="w-10 h-1 rounded-full bg-white/20" />
               </div>
               <div className="pt-6 h-full" style={{ maxHeight: '85vh' }}>
-                <CartPanel onCheckout={() => { setShowCartMobile(false); setShowPayment(true); }} />
+                <CartPanel categories={categories} onCheckout={() => { setShowCartMobile(false); setShowPayment(true); }} />
               </div>
             </motion.div>
           </>
