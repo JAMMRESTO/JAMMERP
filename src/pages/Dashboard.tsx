@@ -235,7 +235,7 @@ function MultiSiteChart({ data, sites, sym }: {
       <BarChart data={chartData} barGap={2} barCategoryGap="25%">
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
         <XAxis dataKey="day" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `${Math.round(v/1000)}k`} />
+        <YAxis tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => Number(v) >= 1000 ? `${Math.round(Number(v)/1000)}k` : Number(v).toLocaleString('fr-FR')} />
         <Tooltip content={<ChartTip sym={sym} />} />
         {sites.map((s, i) => (
           <Bar key={s.id} dataKey={s.id} name={s.name} fill={SITE_COLORS[i % SITE_COLORS.length]} radius={[4,4,0,0]} />
@@ -716,7 +716,7 @@ export function Dashboard() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
                     <XAxis dataKey="day" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `${Math.round(v/1000)}k`} />
+                    <YAxis tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => Number(v) >= 1000 ? `${Math.round(Number(v)/1000)}k` : Number(v).toLocaleString('fr-FR')} />
                     <Tooltip content={<ChartTip sym={sym} />} />
                     <Area type="monotone" dataKey="ventes" stroke="var(--color-primary, #3B82F6)" strokeWidth={2.5} fill="url(#wGrad)" dot={{ fill: 'var(--color-primary, #3B82F6)', r: 3, strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0 }} />
                   </AreaChart>
@@ -781,7 +781,7 @@ export function Dashboard() {
                         </PieChart>
                       </ResponsiveContainer>
                       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                        <p className="text-white font-black text-xs">{Math.round(totalCatValue / 1000)} K</p>
+                        <p className="text-white font-black text-[10px] leading-tight text-center">{totalCatValue.toLocaleString('fr-FR')}</p>
                         <p className="text-white/30 text-[9px]">Total</p>
                       </div>
                     </div>
