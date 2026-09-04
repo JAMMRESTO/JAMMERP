@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Receipt, Loader2, Utensils, Package, Truck, Ban, CheckCircle2, Printer, ChevronDown, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { X, Receipt, Loader2, Utensils, Package, Truck, Ban, CheckCircle2, Printer, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { usePOS } from '../../context/POSContext';
@@ -35,6 +35,11 @@ interface SalesHistoryModalProps {
   onClose: () => void;
 }
 
+interface SaleDetails {
+  items: SaleItem[];
+  payments: Payment[];
+}
+
 function toDateInput(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -56,10 +61,7 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
   const [cancelTarget, setCancelTarget] = useState<Sale | null>(null);
   const [cancelSuccess, setCancelSuccess] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [expandedItems, setExpandedItems] = useState<SaleItem[] | null>(null);
-  const [expandedPayments, setExpandedPayments] = useState<Payment[] | null>(null);
-  const [loadingExpand, setLoadingExpand] = useState(false);
+  const [saleDetails, setSaleDetails] = useState<Record<string, SaleDetails>>({});
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -79,7 +81,28 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
       .lte('created_at', end.toISOString())
       .order('created_at', { ascending: false })
       .limit(100);
-    setSales((data ?? []) as Sale[]);
+
+    const loadedSales = (data ?? []) as Sale[];
+    setSales(loadedSales);
+    setSaleDetails({});
+
+    if (loadedSales.length > 0) {
+      const saleIds = loadedSales.map(sale => sale.id);
+      const [itemsRes, paymentsRes] = await Promise.all([
+        supabase.from('sale_items').select('*').eq('site_id', siteId).in('sale_id', saleIds),
+        supabase.from('payments').select('*').eq('site_id', siteId).in('sale_id', saleIds),
+      ]);
+
+      const details: Record<string, SaleDetails> = {};
+      for (const sale of loadedSales) {
+        details[sale.id] = {
+          items: ((itemsRes.data ?? []).filter(item => item.sale_id === sale.id)) as SaleItem[],
+          payments: ((paymentsRes.data ?? []).filter(payment => payment.sale_id === sale.id)) as Payment[],
+        };
+      }
+      setSaleDetails(details);
+    }
+
     setLoading(false);
   }, [siteId]);
 
@@ -105,26 +128,6 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
     if (d.getTime() === today.getTime()) return "Aujourd'hui";
     if (d.getTime() === yesterday.getTime()) return 'Hier';
     return d.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
-  }
-
-  async function toggleExpand(sale: Sale) {
-    if (expandedId === sale.id) {
-      setExpandedId(null);
-      setExpandedItems(null);
-      setExpandedPayments(null);
-      return;
-    }
-    setExpandedId(sale.id);
-    setExpandedItems(null);
-    setExpandedPayments(null);
-    setLoadingExpand(true);
-    const [itemsRes, paymentsRes] = await Promise.all([
-      supabase.from('sale_items').select('*').eq('sale_id', sale.id).eq('site_id', siteId),
-      supabase.from('payments').select('*').eq('sale_id', sale.id).eq('site_id', siteId),
-    ]);
-    setExpandedItems((itemsRes.data ?? []) as SaleItem[]);
-    setExpandedPayments((paymentsRes.data ?? []) as Payment[]);
-    setLoadingExpand(false);
   }
 
   async function handleCancelConfirm(admin: UserWithRole, reason: string) {
@@ -336,8 +339,8 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
                   const stCfg = statusLabels[sale.status] ?? statusLabels.paid;
                   const isCancelled = sale.status === 'cancelled';
                   const justCancelled = cancelSuccess === sale.id;
-                  const isExpanded = expandedId === sale.id;
                   const isPaid = sale.status === 'paid';
+                  const details = saleDetails[sale.id];
 
                   return (
                     <motion.div
@@ -351,16 +354,6 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
                     >
                       {/* Row */}
                       <div className="flex items-center gap-3 p-3.5">
-                        {/* Expand toggle */}
-                        <button
-                          onClick={() => toggleExpand(sale)}
-                          className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/80 transition-all flex-shrink-0"
-                        >
-                          <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
-                            <ChevronDown size={13} />
-                          </motion.div>
-                        </button>
-
                         {/* Type icon */}
                         <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
                           <Icon size={16} className={cfg.color} />
@@ -450,93 +443,67 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
                         )}
                       </div>
 
-                      {/* Expanded details */}
-                      <AnimatePresence>
-                        {isExpanded && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="overflow-hidden border-t border-white/6"
-                          >
-                            {loadingExpand ? (
-                              <div className="flex items-center justify-center py-4">
-                                <Loader2 size={16} className="text-white/30 animate-spin" />
-                              </div>
-                            ) : (
-                              <div className="p-3 bg-black/20 space-y-1.5">
-                                {expandedItems && expandedItems.length > 0 ? (
-                                  expandedItems.map((item, idx) => (
-                                    <div key={idx} className="flex items-start gap-2 py-1.5 px-2 rounded-lg bg-white/3">
-                                      <span className="text-white/50 text-xs font-mono flex-shrink-0 w-8">{item.quantity}x</span>
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-white/80 text-xs font-medium">{item.product_name}</p>
-                                        {item.variant_label && (
-                                          <p className="text-white/40 text-[10px] mt-0.5">{item.variant_label}</p>
-                                        )}
-                                        {item.sauces && item.sauces.length > 0 && (
-                                          <p className="text-white/40 text-[10px] mt-0.5">
-                                            Sauces: {item.sauces.map(s => s.name).join(', ')}
-                                          </p>
-                                        )}
-                                        {item.flavors && item.flavors.length > 0 && (
-                                          <p className="text-white/40 text-[10px] mt-0.5">
-                                            Goûts: {item.flavors.map(f => f.name).join(', ')}
-                                          </p>
-                                        )}
-                                      </div>
-                                      <div className="text-right flex-shrink-0">
-                                        <p className="text-white/60 text-xs">{item.unit_price.toLocaleString('fr-FR')} {sym}</p>
-                                        <p className="text-white/80 text-xs font-semibold">{item.subtotal.toLocaleString('fr-FR')} {sym}</p>
-                                      </div>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <p className="text-white/30 text-xs text-center py-2">Aucun article</p>
+                      {/* Sale details shown by default */}
+                      <div className="border-t border-white/6 p-3 bg-black/20 space-y-1.5">
+                        {details?.items && details.items.length > 0 ? (
+                          details.items.map((item, idx) => (
+                            <div key={idx} className="flex items-start gap-2 py-1.5 px-2 rounded-lg bg-white/3">
+                              <span className="text-white/50 text-xs font-mono flex-shrink-0 w-8">{item.quantity}x</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-white/80 text-xs font-medium">{item.product_name}</p>
+                                {item.variant_label && <p className="text-white/40 text-[10px] mt-0.5">{item.variant_label}</p>}
+                                {item.sauces && item.sauces.length > 0 && (
+                                  <p className="text-white/40 text-[10px] mt-0.5">Sauces: {item.sauces.map(s => s.name).join(', ')}</p>
                                 )}
-
-                                {/* Payments summary */}
-                                {expandedPayments && expandedPayments.length > 0 && (
-                                  <div className="pt-2 mt-1 border-t border-white/6">
-                                    <p className="text-white/40 text-[10px] font-medium mb-1.5 px-2">Paiements</p>
-                                    {expandedPayments.map((p, idx) => (
-                                      <div key={idx} className="flex items-center justify-between px-2 py-1">
-                                        <span className="text-white/50 text-[11px]">{paymentMethodLabels[p.method] ?? p.method}</span>
-                                        <span className="text-white/70 text-[11px] font-medium">{p.amount.toLocaleString('fr-FR')} {sym}</span>
-                                      </div>
-                                    ))}
-                                  </div>
+                                {item.flavors && item.flavors.length > 0 && (
+                                  <p className="text-white/40 text-[10px] mt-0.5">Goûts: {item.flavors.map(f => f.name).join(', ')}</p>
                                 )}
-
-                                {/* Totals */}
-                                <div className="pt-2 mt-1 border-t border-white/6 px-2 space-y-1">
-                                  {sale.discount_amount > 0 && (
-                                    <div className="flex justify-between">
-                                      <span className="text-white/40 text-[11px]">Sous-total</span>
-                                      <span className="text-white/60 text-[11px]">{sale.subtotal.toLocaleString('fr-FR')} {sym}</span>
-                                    </div>
-                                  )}
-                                  {sale.discount_amount > 0 && (
-                                    <div className="flex justify-between">
-                                      <span className="text-white/40 text-[11px]">Remise</span>
-                                      <span className="text-red-400/80 text-[11px]">-{sale.discount_amount.toLocaleString('fr-FR')} {sym}</span>
-                                    </div>
-                                  )}
-                                  <div className="flex justify-between">
-                                    <span className="text-white/40 text-[11px]">TVA ({settings.tax_rate}%)</span>
-                                    <span className="text-white/60 text-[11px]">{sale.tax_amount.toLocaleString('fr-FR')} {sym}</span>
-                                  </div>
-                                  <div className="flex justify-between font-bold pt-1 border-t border-white/6">
-                                    <span className="text-white/70 text-xs">Total</span>
-                                    <span className="text-white text-xs">{sale.total.toLocaleString('fr-FR')} {sym}</span>
-                                  </div>
-                                </div>
                               </div>
-                            )}
-                          </motion.div>
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-white/60 text-xs">{item.unit_price.toLocaleString('fr-FR')} {sym}</p>
+                                <p className="text-white/80 text-xs font-semibold">{item.subtotal.toLocaleString('fr-FR')} {sym}</p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-white/30 text-xs text-center py-2">Aucun article</p>
                         )}
-                      </AnimatePresence>
+
+                        {details?.payments && details.payments.length > 0 && (
+                          <div className="pt-2 mt-1 border-t border-white/6">
+                            <p className="text-white/40 text-[10px] font-medium mb-1.5 px-2">Paiements</p>
+                            {details.payments.map((payment, idx) => (
+                              <div key={idx} className="flex items-center justify-between px-2 py-1">
+                                <span className="text-white/50 text-[11px]">{paymentMethodLabels[payment.method] ?? payment.method}</span>
+                                <span className="text-white/70 text-[11px] font-medium">{payment.amount.toLocaleString('fr-FR')} {sym}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="pt-2 mt-1 border-t border-white/6 px-2 space-y-1">
+                          {sale.discount_amount > 0 && (
+                            <div className="flex justify-between">
+                              <span className="text-white/40 text-[11px]">Sous-total</span>
+                              <span className="text-white/60 text-[11px]">{sale.subtotal.toLocaleString('fr-FR')} {sym}</span>
+                            </div>
+                          )}
+                          {sale.discount_amount > 0 && (
+                            <div className="flex justify-between">
+                              <span className="text-white/40 text-[11px]">Remise</span>
+                              <span className="text-red-400/80 text-[11px]">-{sale.discount_amount.toLocaleString('fr-FR')} {sym}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between">
+                            <span className="text-white/40 text-[11px]">TVA ({settings.tax_rate}%)</span>
+                            <span className="text-white/60 text-[11px]">{sale.tax_amount.toLocaleString('fr-FR')} {sym}</span>
+                          </div>
+                          <div className="flex justify-between font-bold pt-1 border-t border-white/6">
+                            <span className="text-white/70 text-xs">Total</span>
+                            <span className="text-white text-xs">{sale.total.toLocaleString('fr-FR')} {sym}</span>
+                          </div>
+                        </div>
+                      </div>
                     </motion.div>
                   );
                 })
