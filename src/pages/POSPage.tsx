@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt } from 'lucide-react';
+import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt, FileBarChart } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
 import { printCombined, printReceipt, openCashDrawer, filterKitchenCartItems, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
@@ -19,6 +19,7 @@ import { CustomerPickerModal } from '../components/pos/CustomerPickerModal';
 import { PendingTicketsModal } from '../components/pos/PendingTicketsModal';
 import { SalesHistoryModal } from '../components/pos/SalesHistoryModal';
 import { CashClosureModal } from '../components/pos/CashClosureModal';
+import { XReportReprintModal } from '../components/pos/XReportReprintModal';
 import { useToast } from '../components/ui/Toast';
 import type { Category, Product, SaleType, CashSession } from '../types/database';
 
@@ -89,6 +90,7 @@ function POSInner() {
   const [showPendingTickets, setShowPendingTickets] = useState(false);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [showCashClosure, setShowCashClosure] = useState(false);
+  const [showXReprint, setShowXReprint] = useState(false);
   const [sessionOpenedAt, setSessionOpenedAt] = useState<string>('');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionVersion, setSessionVersion] = useState(0);
@@ -384,6 +386,18 @@ function POSInner() {
           </button>
         )}
 
+        {/* X report reprint button */}
+        <button
+          onClick={() => setShowXReprint(true)}
+          className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-[10px] sm:text-xs font-medium transition-all flex-shrink-0
+            bg-white/4 border-white/10 text-white/40 hover:text-white/70 hover:border-white/20"
+          title="Réimprimer un X de caisse"
+        >
+          <FileBarChart size={12} className="sm:hidden" />
+          <FileBarChart size={13} className="hidden sm:block" />
+          <span className="hidden sm:inline">Réimpr. X</span>
+        </button>
+
         {/* Cash closure button */}
         <button
           onClick={() => setShowCashClosure(true)}
@@ -610,6 +624,12 @@ function POSInner() {
       <AnimatePresence>
         {showReceipt && (
           <ReceiptModal onClose={handleNewSale} onNewSale={handleNewSale} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showXReprint && (
+          <XReportReprintModal onClose={() => setShowXReprint(false)} />
         )}
       </AnimatePresence>
 
