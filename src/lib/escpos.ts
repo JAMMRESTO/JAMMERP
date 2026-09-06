@@ -600,9 +600,9 @@ export function buildXReportBytes(
   parts.push(solidLine(RECEIPT_WIDTH));
 
   parts.push(LEFT);
-  parts.push(strBytes(padLine('Date', fmtDate(openedAt))));
-  parts.push(strBytes(padLine('Ouverture', fmtTime(openedAt))));
-  parts.push(strBytes(padLine('Fermeture', fmtTime(closedAt))));
+  parts.push(strBytes(padLine('Date', fmtDate(closedAt))));
+  parts.push(strBytes(padLine('Ouverture', `${fmtDate(openedAt)} ${fmtTime(openedAt)}`)));
+  parts.push(strBytes(padLine('Fermeture', `${fmtDate(closedAt)} ${fmtTime(closedAt)}`)));
   parts.push(strBytes(padLine('Caissier', data.cashierName)));
   parts.push(dashedLine());
 
@@ -807,5 +807,136 @@ export async function printDeliveryTicket(
   settings: EscposDeliverySettings
 ): Promise<boolean> {
   const bytes = buildDeliveryTicketBytes(data, settings);
+  return sendBytes(bytes);
+}
+
+// ─── Kitchen ticket items ───
+// All items (including drinks) are sent to the kitchen ticket — the kitchen prepares everything.
+
+export function filterKitchenCartItems<T extends { product: { category_id: string | null } }>(
+  items: T[],
+  _categories: { id: string; name: string }[]
+): T[] {
+  return items;
+}
+
+// ─── Deferred receipt (pending payment) ───
+
+export interface EscposDeferredReceiptData {
+  saleNumber: string;
+  createdAt: string;
+  saleType: string;
+  tableNumber?: string | number | null;
+  cashierName?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerAddress?: string | null;
+  items: {
+    quantity: number;
+    product_name: string;
+    unit_price: number;
+    subtotal: number;
+    variant_label?: string | null;
+    sauces?: { name: string; price_supplement?: number }[] | null;
+    flavors?: { name: string }[] | null;
+  }[];
+  subtotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+}
+
+export function buildDeferredReceiptBytes(
+  data: EscposDeferredReceiptData,
+  settings: EscposReceiptSettings
+): Uint8Array {
+  const sym = printerSafeText(settings.currency_symbol);
+  const fmtNumber = (n: number) => printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
+  const fmt = (n: number) => `${fmtNumber(n)} ${sym}`;
+
+  const dateObj = new Date(data.createdAt);
+  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const parts: Uint8Array[] = [INIT, CENTER];
+
+  parts.push(
+    BOLD_ON,
+    LARGE_ON,
+    line(settings.restaurant_name.toUpperCase()),
+    LARGE_OFF,
+    BOLD_OFF,
+  );
+  if (settings.address) parts.push(line(settings.address));
+  if (settings.phone) parts.push(line(`Tel: ${settings.phone}`));
+
+  parts.push(LEFT, solidLine(RECEIPT_WIDTH));
+  parts.push(BOLD_ON, DOUBLE_ON, line('EN ATTENTE DE PAIEMENT'), DOUBLE_OFF, BOLD_OFF);
+  parts.push(solidLine(RECEIPT_WIDTH));
+
+  parts.push(strBytes(padLine(`Ticket N: ${data.saleNumber}`, '')));
+  parts.push(strBytes(padLine(`Date: ${dateStr}`, `Heure: ${timeStr}`)));
+  if (data.tableNumber) {
+    parts.push(strBytes(padLine(`Table: ${data.tableNumber}`, `Serveur: ${data.cashierName ?? 'N/A'}`)));
+  } else {
+    parts.push(strBytes(padLine('Serveur:', data.cashierName ?? 'N/A')));
+  }
+  if (data.customerName) parts.push(strBytes(padLine('Client:', data.customerName)));
+  if (data.customerPhone) parts.push(strBytes(padLine('Tel:', data.customerPhone)));
+  if (data.saleType !== 'dine_in') {
+    parts.push(strBytes(padLine('Mode:', saleTypeReceiptLabels[data.saleType] ?? data.saleType)));
+  }
+
+  if (data.customerAddress) {
+    parts.push(dashedLine());
+    parts.push(BOLD_ON, line('ADRESSE DE LIVRAISON'), BOLD_OFF);
+    const addrLines = wrapPrinterText(data.customerAddress, RECEIPT_WIDTH);
+    for (const l of addrLines) parts.push(line(l));
+  }
+
+  parts.push(dashedLine());
+  parts.push(strBytes(padColumns('Qte', 'Designation', 'P.U.', 'Total')));
+  parts.push(dashedLine());
+
+  for (const item of data.items) {
+    const nameLines = wrapPrinterText(item.product_name, RECEIPT_DESCRIPTION_WIDTH);
+    parts.push(strBytes(padColumns(`${item.quantity}x`, nameLines[0], fmtNumber(item.unit_price), fmtNumber(item.subtotal))));
+    for (const nameLine of nameLines.slice(1)) {
+      parts.push(strBytes(padColumns('', nameLine, '', '')));
+    }
+    if (item.variant_label) {
+      parts.push(strBytes(`  > ${printerSafeText(item.variant_label)}\n`));
+    }
+    if (item.sauces && item.sauces.length > 0) {
+      parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => printerSafeText(s.name)).join(', ')}\n`));
+    }
+    if (item.flavors && item.flavors.length > 0) {
+      parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => printerSafeText(f.name)).join(', ')}\n`));
+    }
+  }
+
+  parts.push(dashedLine());
+  if (data.discountAmount > 0) {
+    parts.push(strBytes(padLine('Sous-total', fmt(data.subtotal))));
+    parts.push(strBytes(padLine('Remise', `- ${fmt(data.discountAmount)}`)));
+  }
+  parts.push(strBytes(padLine(`TVA (${settings.tax_rate}%)`, fmt(data.taxAmount))));
+  parts.push(solidLine(RECEIPT_WIDTH));
+  parts.push(BOLD_ON, strBytes(padLine('TOTAL TTC', fmt(data.total))), BOLD_OFF);
+  parts.push(solidLine(RECEIPT_WIDTH));
+
+  parts.push(CENTER, BOLD_ON, line('A REGLER ULTERIEUREMENT'), BOLD_OFF);
+  parts.push(dashedLine());
+
+  parts.push(CENTER, line(settings.receipt_footer || 'Merci de votre visite!'), line('A bientot.'), LEFT);
+  parts.push(FEED(5), CUT);
+  return concat(...parts);
+}
+
+export async function printDeferredReceipt(
+  data: EscposDeferredReceiptData,
+  settings: EscposReceiptSettings
+): Promise<boolean> {
+  const bytes = buildDeferredReceiptBytes(data, settings);
   return sendBytes(bytes);
 }

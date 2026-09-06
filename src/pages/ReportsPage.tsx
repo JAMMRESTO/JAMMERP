@@ -538,7 +538,7 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 flex-1">
-          <StatCard label="Chiffre d'affaires" value={`${(totalRevenue/1000).toFixed(1)}K`} sub={sym} color="text-blue-400" />
+          <StatCard label="Chiffre d'affaires" value={totalRevenue.toLocaleString('fr-FR')} sub={sym} color="text-blue-400" />
           <StatCard label="Transactions" value={sales.length} color="text-white" />
           <StatCard label="Ticket moyen" value={`${Math.round(avgTicket).toLocaleString('fr-FR')}`} sub={sym} color="text-emerald-400" />
           <StatCard label="Remises totales" value={`${Math.round(totalDiscount).toLocaleString('fr-FR')}`} sub={sym} color="text-amber-400" />
@@ -586,7 +586,7 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                 <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                <YAxis tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => Number(v) >= 1000 ? `${Math.round(Number(v)/1000)}k` : Number(v).toLocaleString('fr-FR')} />
                 <Tooltip content={<ChartTooltip sym={sym} />} />
                 <Area type="monotone" dataKey="total" stroke="#3B82F6" strokeWidth={2} fill="url(#saleGrad)" name="Ventes" />
               </AreaChart>
@@ -775,7 +775,7 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <StatCard label="Produits vendus (réf)" value={items.length} color="text-white" />
         <StatCard label="Unités totales" value={items.reduce((s, i) => s + i.total_qty, 0).toLocaleString('fr-FR')} color="text-blue-400" />
-        <StatCard label="CA produits" value={`${(totalRevenue/1000).toFixed(1)}K`} sub={sym} color="text-emerald-400" />
+        <StatCard label="CA produits" value={totalRevenue.toLocaleString('fr-FR')} sub={sym} color="text-emerald-400" />
       </div>
 
       <div className="flex gap-2 justify-end">
@@ -796,7 +796,7 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={top10} layout="vertical" barSize={14}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
-              <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+              <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => Number(v) >= 1000 ? `${Math.round(Number(v)/1000)}k` : Number(v).toLocaleString('fr-FR')} />
               <YAxis type="category" dataKey="product_name" width={110} tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
               <Tooltip content={<ChartTooltip sym={sym} />} />
               <Bar dataKey="total_revenue" name="CA" radius={[0, 4, 4, 0]}>
@@ -807,8 +807,8 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
         </div>
       )}
 
-      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-x-auto mobile-scroll-x">
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3 min-w-[480px]">
+      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+        <div className="hidden sm:flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
           <div className="w-8 text-white/30 text-xs font-medium">Rang</div>
           <div className="flex-1 text-white/30 text-xs font-medium">Produit</div>
           <div className="w-24 text-white/30 text-xs font-medium text-right">Qté vendue</div>
@@ -825,22 +825,28 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
         ) : items.map((item, idx) => {
           const pct = totalRevenue > 0 ? (item.total_revenue / totalRevenue) * 100 : 0;
           return (
-            <div key={item.product_name} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors min-w-[480px]">
-              <div className="w-8 text-white/30 text-xs font-bold">{idx + 1}</div>
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-medium truncate">{item.product_name}</p>
-                <div className="h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
-                  <div className="h-full rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
+            <div key={item.product_name} className="px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+              <div className="flex items-center gap-3">
+                <div className="w-8 text-white/30 text-xs font-bold flex-shrink-0">{idx + 1}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-medium truncate">{item.product_name}</p>
+                  <div className="h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
+                    <div className="h-full rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+                <div className="hidden sm:block w-24 text-right">
+                  <p className="text-white/70 text-sm">{item.total_qty.toLocaleString('fr-FR')}</p>
+                </div>
+                <div className="w-20 sm:w-28 text-right">
+                  <p className="text-white font-semibold text-sm">{item.total_revenue.toLocaleString('fr-FR')} {sym}</p>
+                </div>
+                <div className="hidden sm:block w-20 text-right">
+                  <p className="text-blue-400 text-xs font-medium">{pct.toFixed(1)}%</p>
                 </div>
               </div>
-              <div className="w-24 text-right">
-                <p className="text-white/70 text-sm">{item.total_qty.toLocaleString('fr-FR')}</p>
-              </div>
-              <div className="w-28 text-right">
-                <p className="text-white font-semibold text-sm">{item.total_revenue.toLocaleString('fr-FR')} {sym}</p>
-              </div>
-              <div className="w-20 text-right">
-                <p className="text-blue-400 text-xs font-medium">{pct.toFixed(1)}%</p>
+              <div className="sm:hidden mt-2 flex items-center justify-between text-xs">
+                <span className="text-white/40">Qté: <span className="text-white/70">{item.total_qty.toLocaleString('fr-FR')}</span></span>
+                <span className="text-blue-400 font-medium">{pct.toFixed(1)}%</span>
               </div>
             </div>
           );
@@ -927,8 +933,8 @@ function DriversReport({ range, sym, settings }: { range: PeriodRange; sym: stri
         </button>
       </div>
 
-      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-x-auto mobile-scroll-x">
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3 min-w-[400px]">
+      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+        <div className="hidden sm:flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
           <div className="flex-1 text-white/30 text-xs font-medium">Livreur</div>
           <div className="w-20 text-white/30 text-xs font-medium text-right">Livraisons</div>
           <div className="hidden sm:block w-28 text-white/30 text-xs font-medium text-right">CA</div>
@@ -943,21 +949,27 @@ function DriversReport({ range, sym, settings }: { range: PeriodRange; sym: stri
             <p className="text-white/30 text-sm">Aucune livraison sur cette période</p>
           </div>
         ) : data.map(d => (
-          <div key={d.name} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors min-w-[400px]">
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-medium text-sm">{d.name}</p>
+          <div key={d.name} className="px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-medium text-sm truncate">{d.name}</p>
+              </div>
+              <div className="w-16 sm:w-20 text-right">
+                <p className="text-blue-400 font-bold text-sm">{d.deliveries}</p>
+              </div>
+              <div className="hidden sm:block w-28 text-right">
+                <p className="text-white text-sm">{d.revenue.toLocaleString('fr-FR')} {sym}</p>
+              </div>
+              <div className="w-20 sm:w-28 text-right">
+                <p className="text-emerald-400 font-semibold text-sm">{d.commission.toLocaleString('fr-FR')} {sym}</p>
+              </div>
+              <div className="hidden md:block w-24 text-right">
+                <p className="text-white/50 text-sm">{d.avg_time > 0 ? `${d.avg_time} min` : '—'}</p>
+              </div>
             </div>
-            <div className="w-20 text-right">
-              <p className="text-blue-400 font-bold text-sm">{d.deliveries}</p>
-            </div>
-            <div className="hidden sm:block w-28 text-right">
-              <p className="text-white text-sm">{d.revenue.toLocaleString('fr-FR')} {sym}</p>
-            </div>
-            <div className="w-28 text-right">
-              <p className="text-emerald-400 font-semibold text-sm">{d.commission.toLocaleString('fr-FR')} {sym}</p>
-            </div>
-            <div className="hidden md:block w-24 text-right">
-              <p className="text-white/50 text-sm">{d.avg_time > 0 ? `${d.avg_time} min` : '—'}</p>
+            <div className="sm:hidden mt-2 flex items-center justify-between text-xs">
+              <span className="text-white/40">CA: <span className="text-white/70">{d.revenue.toLocaleString('fr-FR')} {sym}</span></span>
+              <span className="text-white/40">Temps: <span className="text-white/70">{d.avg_time > 0 ? `${d.avg_time} min` : '—'}</span></span>
             </div>
           </div>
         ))}
@@ -996,8 +1008,8 @@ function StockReport({ sym, settings }: { sym: string; settings: PrintReportSett
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Valeur produits" value={`${(productValue/1000).toFixed(1)}K`} sub={sym} color="text-blue-400" />
-        <StatCard label="Valeur ingrédients" value={`${(ingredientValue/1000).toFixed(1)}K`} sub={sym} color="text-emerald-400" />
+        <StatCard label="Valeur produits" value={productValue.toLocaleString('fr-FR')} sub={sym} color="text-blue-400" />
+        <StatCard label="Valeur ingrédients" value={ingredientValue.toLocaleString('fr-FR')} sub={sym} color="text-emerald-400" />
         <StatCard label="Alertes stock" value={alerts.length} color={alerts.length > 0 ? 'text-amber-400' : 'text-white/50'} />
         <StatCard label="Ruptures" value={outOfStock.length} color={outOfStock.length > 0 ? 'text-red-400' : 'text-white/50'} />
       </div>
@@ -1105,7 +1117,7 @@ function ProductionReport({ range, sym, settings }: { range: PeriodRange; sym: s
         <StatCard label="Productions" value={prods.length} color="text-white" />
         <StatCard label="Unités produites" value={totalProduced.toLocaleString('fr-FR')} color="text-emerald-400" />
         <StatCard label="Taux de perte" value={`${lossRate.toFixed(1)}%`} color={lossRate > 10 ? 'text-red-400' : lossRate > 5 ? 'text-amber-400' : 'text-emerald-400'} />
-        <StatCard label="Coût total" value={`${(totalCost/1000).toFixed(1)}K`} sub={sym} color="text-blue-400" />
+        <StatCard label="Coût total" value={totalCost.toLocaleString('fr-FR')} sub={sym} color="text-blue-400" />
       </div>
 
       <div className="flex gap-2 justify-end">
@@ -1120,8 +1132,8 @@ function ProductionReport({ range, sym, settings }: { range: PeriodRange; sym: s
         </button>
       </div>
 
-      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-x-auto mobile-scroll-x">
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3 min-w-[480px]">
+      <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+        <div className="hidden sm:flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
           <div className="flex-1 text-white/30 text-xs font-medium">Produit</div>
           <div className="w-20 text-white/30 text-xs font-medium text-right">Produit</div>
           <div className="hidden sm:block w-16 text-white/30 text-xs font-medium text-right">Pertes</div>
@@ -1137,24 +1149,30 @@ function ProductionReport({ range, sym, settings }: { range: PeriodRange; sym: s
             <p className="text-white/30 text-sm">Aucune production sur cette période</p>
           </div>
         ) : prods.map((p, i) => (
-          <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors min-w-[480px]">
-            <div className="flex-1 min-w-0">
-              <p className="text-white text-sm font-medium truncate">{p.product_name}</p>
+          <div key={i} className="px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-medium truncate">{p.product_name}</p>
+              </div>
+              <div className="w-16 sm:w-20 text-right">
+                <p className="text-emerald-400 font-semibold text-sm">{p.quantity_produced}</p>
+              </div>
+              <div className="hidden sm:block w-16 text-right">
+                {p.loss_quantity > 0 ? <p className="text-red-400 text-sm">{p.loss_quantity}</p> : <p className="text-white/20 text-sm">—</p>}
+              </div>
+              <div className="hidden md:block w-28 text-right">
+                <p className="text-white/50 text-sm">{p.unit_cost.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} {sym}</p>
+              </div>
+              <div className="w-20 sm:w-28 text-right">
+                <p className="text-white font-semibold text-sm">{p.total_cost.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} {sym}</p>
+              </div>
+              <div className="hidden sm:block w-24 text-right">
+                <p className="text-white/40 text-xs">{new Date(p.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</p>
+              </div>
             </div>
-            <div className="w-20 text-right">
-              <p className="text-emerald-400 font-semibold text-sm">{p.quantity_produced}</p>
-            </div>
-            <div className="hidden sm:block w-16 text-right">
-              {p.loss_quantity > 0 ? <p className="text-red-400 text-sm">{p.loss_quantity}</p> : <p className="text-white/20 text-sm">—</p>}
-            </div>
-            <div className="hidden md:block w-28 text-right">
-              <p className="text-white/50 text-sm">{p.unit_cost.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} {sym}</p>
-            </div>
-            <div className="w-28 text-right">
-              <p className="text-white font-semibold text-sm">{p.total_cost.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} {sym}</p>
-            </div>
-            <div className="w-24 text-right">
-              <p className="text-white/40 text-xs">{new Date(p.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</p>
+            <div className="sm:hidden mt-2 flex items-center justify-between text-xs">
+              <span className="text-white/40">Pertes: <span className="text-red-400/80">{p.loss_quantity > 0 ? p.loss_quantity : '—'}</span></span>
+              <span className="text-white/40">Coût unit.: <span className="text-white/70">{p.unit_cost.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} {sym}</span></span>
             </div>
           </div>
         ))}
