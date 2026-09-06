@@ -4,7 +4,7 @@ import {
   X, Banknote, Smartphone, CreditCard, AlertTriangle,
   CheckCircle2, Loader2, TrendingUp, ShoppingBag,
   Lock, ChevronRight, ArrowUpRight, ArrowDownRight,
-  Receipt, Printer, Eye
+  Receipt, Printer
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
@@ -26,7 +26,6 @@ interface CashClosureModalProps {
   onClose: () => void;
   onClosed: (session: CashSession) => void;
   openedAt: string; // ISO — début de session
-  sessionId: string | null; // id de la session ouverte à clôturer
 }
 
 function fmt(n: number, sym: string) {
@@ -84,7 +83,7 @@ const METHOD_CONFIG: { id: PaymentMethod; label: string; icon: typeof Banknote; 
   { id: 'card', label: 'Carte', icon: CreditCard, color: 'text-violet-400' },
 ];
 
-export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: CashClosureModalProps) {
+export function CashClosureModal({ onClose, onClosed, openedAt }: CashClosureModalProps) {
   const { currentUser } = useAuth();
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
@@ -93,7 +92,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
   const { connected: printerConnected } = usePrinter();
   const { toast } = useToast();
 
-  const [step, setStep] = useState<'review' | 'preview' | 'count' | 'confirm' | 'done'>('review');
+  const [step, setStep] = useState<'review' | 'count' | 'confirm' | 'done'>('review');
   const [summary, setSummary] = useState<SalesSummary>({ total_sales: 0, sales_count: 0, by_method: { cash: 0, wave: 0, orange_money: 0, card: 0 }, by_category: [] });
   const [openingBalance, setOpeningBalance] = useState('');
   const [actualCash, setActualCash] = useState('');
@@ -101,7 +100,6 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [closedSession, setClosedSession] = useState<CashSession | null>(null);
-
 
   useEffect(() => {
     async function loadSummary() {
@@ -165,10 +163,11 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
 
   async function handleClose() {
     setSaving(true);
-    const closedAt = new Date().toISOString();
-    const payload = {
+    const { data } = await supabase.from('cash_sessions').insert({
+      cashier_id: currentUser?.id ?? null,
       closed_by: currentUser?.id ?? null,
-      closed_at: closedAt,
+      opened_at: openedAt,
+      closed_at: new Date().toISOString(),
       opening_balance: opening,
       expected_cash: expectedCash,
       actual_cash: actual,
@@ -181,31 +180,8 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
       sales_count: summary.sales_count,
       notes,
       status: 'closed',
-    };
-
-    let data: CashSession | null = null;
-    if (sessionId) {
-      // Update the existing open session
-      const { data: updated } = await supabase
-        .from('cash_sessions')
-        .update(payload)
-        .eq('id', sessionId)
-        .eq('status', 'open')
-        .select()
-        .maybeSingle();
-      data = (updated as CashSession | null) ?? null;
-    }
-    if (!data) {
-      // Fallback: insert a new closed session (e.g. session was already closed)
-      const { data: inserted } = await supabase.from('cash_sessions').insert({
-        cashier_id: currentUser?.id ?? null,
-        closed_by: currentUser?.id ?? null,
-        opened_at: openedAt,
-        ...payload,
-        site_id: siteId,
-      }).select().maybeSingle();
-      data = (inserted as CashSession | null) ?? null;
-    }
+      site_id: siteId,
+    }).select().maybeSingle();
 
     setSaving(false);
     if (data) {
@@ -361,105 +337,9 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                       </div>
                     )}
 
-                    <div className="flex gap-2 mb-3">
-                      <button onClick={() => setStep('preview')}
-                        className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white font-medium rounded-xl text-sm transition-all border border-white/8 hover:border-white/15">
-                        <Eye size={14} /> Aperçu X
-                      </button>
-                    </div>
-
                     <button onClick={() => setStep('count')}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-sm transition-colors">
                       Continuer <ChevronRight size={15} />
-                    </button>
-                  </motion.div>
-                )}
-
-                {/* STEP PREVIEW — Aperçu X de caisse */}
-                {step === 'preview' && (
-                  <motion.div key="preview" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                    <p className="text-white/60 text-xs mb-3">Aperçu X de caisse — résumé avant clôture</p>
-
-                    {summary.sales_count === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-12 text-center">
-                        <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-3">
-                          <Receipt size={20} className="text-white/20" />
-                        </div>
-                        <p className="text-white/30 font-medium text-sm">Aucune vente</p>
-                        <p className="text-white/20 text-xs mt-1">Aucune commande payée durant cette session</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-                        {/* Activité */}
-                        <div>
-                          <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Activité</p>
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
-                              <div className="flex items-center gap-2">
-                                <ShoppingBag size={13} className="text-white/40" />
-                                <span className="text-white/60 text-xs">Nombre de ventes</span>
-                              </div>
-                              <span className="text-white font-semibold text-sm">{summary.sales_count}</span>
-                            </div>
-                            <div className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
-                              <div className="flex items-center gap-2">
-                                <TrendingUp size={13} className="text-emerald-400" />
-                                <span className="text-white/60 text-xs">Chiffre d'affaires</span>
-                              </div>
-                              <span className="text-emerald-400 font-bold text-sm">{fmt(summary.total_sales, sym)}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Encaissements par mode de règlement */}
-                        <div>
-                          <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Encaissements</p>
-                          <div className="space-y-1.5">
-                            {METHOD_CONFIG.map(m => (
-                              <div key={m.id} className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
-                                <div className="flex items-center gap-2">
-                                  <m.icon size={13} className={m.color} />
-                                  <span className="text-white/60 text-xs">{m.label}</span>
-                                </div>
-                                <span className={`font-semibold text-sm ${summary.by_method[m.id] > 0 ? 'text-white' : 'text-white/25'}`}>
-                                  {fmt(summary.by_method[m.id], sym)}
-                                </span>
-                              </div>
-                            ))}
-                            <div className="flex items-center justify-between py-2 px-3 bg-amber-500/8 rounded-xl border border-amber-500/20">
-                              <span className="text-amber-300 text-xs font-semibold">Total encaissé</span>
-                              <span className="text-amber-300 font-bold text-sm">
-                                {fmt(summary.by_method.cash + summary.by_method.wave + summary.by_method.orange_money + summary.by_method.card, sym)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Ventes par catégorie */}
-                        {summary.by_category.length > 0 && (
-                          <div>
-                            <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Ventes par catégorie</p>
-                            <div className="space-y-1.5">
-                              {summary.by_category.map(cat => (
-                                <div key={cat.name} className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className="text-white/70 text-xs truncate">{cat.name}</span>
-                                    <span className="text-white/25 text-[10px] flex-shrink-0">{cat.count} art.</span>
-                                  </div>
-                                  <span className="text-white font-semibold text-xs flex-shrink-0 ml-2">
-                                    {fmt(cat.total, sym)}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <button onClick={() => setStep('review')}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 mt-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-sm transition-colors">
-                      Retour au résumé
                     </button>
                   </motion.div>
                 )}

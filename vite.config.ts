@@ -18,17 +18,7 @@ function buildVersionPlugin() {
 
 export default defineConfig({
   plugins: [react(), buildVersionPlugin()],
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'supabase': ['@supabase/supabase-js'],
-          'charts': ['recharts'],
-          'icons': ['lucide-react'],
-          'animation': ['framer-motion'],
-        },
-      },
-    },
+  optimizeDeps: {
+    exclude: ['lucide-react'],
   },
 });

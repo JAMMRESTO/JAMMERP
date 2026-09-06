@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, ChevronDown, X, Utensils, Check, CupSoda } from 'lucide-react';
+import { AlertCircle, ChevronDown, X, Utensils, Check } from 'lucide-react';
 import type { Product, ProductVariant, Sauce, SelectedSauce, Flavor, SelectedFlavor, Category } from '../../types/database';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
@@ -348,155 +348,17 @@ function FlavorModal({ product, flavors, required, maxCount, onConfirm, onClose 
   );
 }
 
-interface MenuDrinkModalProps {
-  product: Product;
-  drinks: Product[];
-  onConfirm: (drink: Product, variantLabel: string) => void;
-  onClose: () => void;
-}
-
-function MenuDrinkModal({ product, drinks, onConfirm, onClose }: MenuDrinkModalProps) {
-  const [selected, setSelected] = useState<{ drink: Product; variantLabel: string } | null>(null);
-
-  return createPortal(
-    <AnimatePresence>
-      <motion.div
-        key="drink-backdrop"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4"
-        onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      >
-        <motion.div
-          key="drink-panel"
-          initial={{ y: 32, opacity: 0, scale: 0.97 }}
-          animate={{ y: 0, opacity: 1, scale: 1 }}
-          exit={{ y: 32, opacity: 0, scale: 0.97 }}
-          transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-          className="w-full max-w-sm bg-gray-900 border border-white/12 rounded-3xl shadow-2xl overflow-hidden"
-        >
-          <div className="flex items-start justify-between p-5 pb-4 border-b border-white/8">
-            <div className="flex gap-3 items-center min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center flex-shrink-0">
-                <CupSoda size={16} className="text-emerald-300" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white font-bold text-base leading-tight truncate">{product.name}</p>
-                <p className="text-white/40 text-xs mt-0.5">Choisissez la boisson incluse</p>
-              </div>
-            </div>
-            <button
-              onClick={onClose}
-              className="flex-shrink-0 w-8 h-8 rounded-xl bg-white/8 hover:bg-white/14 flex items-center justify-center text-white/40 hover:text-white transition-all ml-2"
-            >
-              <X size={15} />
-            </button>
-          </div>
-
-          <div className="p-5 pt-4 max-h-[55vh] overflow-y-auto">
-            {drinks.length === 0 ? (
-              <p className="text-white/40 text-sm text-center py-6">Aucune boisson disponible</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {drinks.map(d => {
-                  const variants = d.variants as ProductVariant[];
-                  const isSelected = selected?.drink.id === d.id;
-                  const hasDrinkVariants = variants.length > 0;
-                  const selectedVariant = isSelected ? selected.variantLabel : '';
-
-                  return (
-                    <motion.div
-                      key={d.id}
-                      layout
-                      className={`rounded-2xl border transition-all p-2.5 text-center
-                        ${isSelected
-                          ? 'bg-emerald-500/20 border-emerald-500/50'
-                          : 'bg-white/5 border-white/10'}`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => !hasDrinkVariants && setSelected({ drink: d, variantLabel: '' })}
-                        className={`w-full flex flex-col items-center justify-center gap-1.5 text-center ${!hasDrinkVariants ? 'cursor-pointer' : 'cursor-default'}`}
-                      >
-                        {d.image_url ? (
-                          <img src={d.image_url} alt={d.name} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
-                        ) : (
-                          <CupSoda size={17} className="text-white/40 flex-shrink-0" />
-                        )}
-                        <span className="text-xs font-medium leading-tight line-clamp-2 break-words text-white">{d.name}</span>
-                        {!hasDrinkVariants && (
-                          <span className={`w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-white/20'}`}>
-                            {isSelected && <Check size={13} className="text-gray-900" strokeWidth={3} />}
-                          </span>
-                        )}
-                      </button>
-                      {hasDrinkVariants && (
-                        <div className="mt-2 pt-2 border-t border-white/10">
-                          <p className="text-[9px] uppercase tracking-wide text-white/40 mb-1.5">Taille</p>
-                          <div className="flex flex-wrap justify-center gap-1">
-                            {variants.map(variant => {
-                              const variantSelected = isSelected && selectedVariant === variant.label;
-                              return (
-                                <button
-                                  key={variant.label}
-                                  type="button"
-                                  onClick={() => setSelected({ drink: d, variantLabel: variant.label })}
-                                  className={`rounded-lg border px-2 py-1 text-[10px] font-medium transition-all ${variantSelected
-                                    ? 'bg-emerald-500 border-emerald-500 text-gray-900'
-                                    : 'bg-white/5 border-white/15 text-white/70 hover:bg-emerald-500/15 hover:border-emerald-500/40 hover:text-white'}`}
-                                >
-                                  {variant.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="p-5 pt-0 flex gap-2">
-            <button
-              onClick={onClose}
-              className="flex-1 py-2.5 rounded-2xl bg-white/4 hover:bg-white/8 text-white/50 hover:text-white/80 text-sm transition-all"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={() => selected && onConfirm(selected.drink, selected.variantLabel)}
-              disabled={!selected}
-              className="flex-1 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed text-gray-900 text-sm font-semibold transition-all"
-            >
-              Valider
-            </button>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>,
-    document.body
-  );
-}
-
 interface ProductCardProps {
   product: Product;
   categories: Category[];
-  allProducts: Product[];
 }
 
-function ProductCard({ product, categories, allProducts }: ProductCardProps) {
+function ProductCard({ product, categories }: ProductCardProps) {
   const { addToCart, sauces: allSauces, flavors: allFlavors } = usePOS();
   const category = categories.find(c => c.id === product.category_id);
   const { settings } = useSettings();
   const [showVariants, setShowVariants] = useState(false);
   const [pendingVariant, setPendingVariant] = useState<{ label: string; price?: number } | null>(null);
-  const [showMenuDrink, setShowMenuDrink] = useState(false);
-  const [pendingDrink, setPendingDrink] = useState<Product | null>(null);
-  const [pendingDrinkVariant, setPendingDrinkVariant] = useState('');
   const [showSauces, setShowSauces] = useState(false);
   const [showFlavors, setShowFlavors] = useState(false);
   const [pendingSauces, setPendingSauces] = useState<SelectedSauce[]>([]);
@@ -504,12 +366,6 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
   const hasVariants = (product.variants as ProductVariant[]).length > 0;
   const needsSauce = settings.sauces_enabled && Boolean(category?.requires_sauce);
   const needsFlavor = settings.flavors_enabled && Boolean(category?.requires_flavor);
-
-  const drinkCategoryIds = new Set(
-    categories.filter(c => /boisson/i.test(c.name)).map(c => c.id)
-  );
-  const drinkProducts = allProducts.filter(p => p.category_id && drinkCategoryIds.has(p.category_id));
-  const hasMenuVariant = (product.variants as ProductVariant[]).some(v => /menu/i.test(v.label));
 
   const availableSauces = needsSauce
     ? (category?.allowed_sauce_ids?.length
@@ -543,11 +399,6 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
 
   function handleVariantSelect(label: string, price?: number) {
     setShowVariants(false);
-    if (/menu/i.test(label) && drinkProducts.length > 0) {
-      setPendingVariant({ label, price });
-      setShowMenuDrink(true);
-      return;
-    }
     if (needsSauce && availableSauces.length > 0) {
       setPendingVariant({ label, price });
       setShowSauces(true);
@@ -561,30 +412,6 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
     finalize(label, price, [], []);
   }
 
-  function handleMenuDrinkConfirm(drink: Product, drinkVariant: string) {
-    setShowMenuDrink(false);
-    addMainAndDrink(drink, drinkVariant);
-  }
-
-  function addMainAndDrink(drink: Product, drinkVariant: string) {
-    const v = pendingVariant ?? { label: '', price: undefined };
-    setPendingVariant(null);
-    setPendingDrink(drink);
-    setPendingDrinkVariant(drinkVariant);
-    if (needsSauce && availableSauces.length > 0) {
-      setPendingVariant(v);
-      setShowSauces(true);
-      return;
-    }
-    if (needsFlavor && availableFlavors.length > 0) {
-      setPendingVariant(v);
-      setShowFlavors(true);
-      return;
-    }
-    finalize(v.label, v.price, [], []);
-    flushPendingDrink(drink, drinkVariant);
-  }
-
   function handleSaucesConfirm(selected: SelectedSauce[]) {
     setShowSauces(false);
     if (needsFlavor && availableFlavors.length > 0) {
@@ -595,7 +422,6 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
     const v = pendingVariant ?? { label: '', price: undefined };
     setPendingVariant(null);
     finalize(v.label, v.price, selected, []);
-    flushPendingDrink(pendingDrink, pendingDrinkVariant);
   }
 
   function handleFlavorsConfirm(selected: SelectedFlavor[]) {
@@ -604,15 +430,6 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
     setPendingVariant(null);
     setPendingSauces([]);
     finalize(v.label, v.price, pendingSauces, selected);
-    flushPendingDrink(pendingDrink, pendingDrinkVariant);
-  }
-
-  function flushPendingDrink(drink: Product | null, drinkVariant: string) {
-    if (drink) {
-      addToCart(drink, drinkVariant ? `${drinkVariant} - Inclus menu` : 'Inclus menu', 0, [], []);
-      setPendingDrink(null);
-      setPendingDrinkVariant('');
-    }
   }
 
   function finalize(variant: string, price: number | undefined, saucesForItem: SelectedSauce[], flavorsForItem: SelectedFlavor[]) {
@@ -633,14 +450,6 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
           onClose={() => setShowVariants(false)}
         />
       )}
-      {showMenuDrink && (
-        <MenuDrinkModal
-          product={product}
-          drinks={drinkProducts}
-          onConfirm={handleMenuDrinkConfirm}
-          onClose={() => { setShowMenuDrink(false); setPendingVariant(null); setPendingDrink(null); setPendingDrinkVariant(''); }}
-        />
-      )}
       {showSauces && (
         <SauceModal
           product={product}
@@ -648,7 +457,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
           required={Boolean(category?.sauce_required)}
           maxCount={Math.min(3, Math.max(1, category?.sauce_count ?? 1))}
           onConfirm={handleSaucesConfirm}
-          onClose={() => { setShowSauces(false); setPendingVariant(null); setPendingDrink(null); setPendingDrinkVariant(''); }}
+          onClose={() => { setShowSauces(false); setPendingVariant(null); }}
         />
       )}
       {showFlavors && (
@@ -658,7 +467,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
           required={Boolean(category?.flavor_required)}
           maxCount={Math.min(3, Math.max(1, category?.flavor_count ?? 1))}
           onConfirm={handleFlavorsConfirm}
-          onClose={() => { setShowFlavors(false); setPendingVariant(null); setPendingSauces([]); setPendingDrink(null); setPendingDrinkVariant(''); }}
+          onClose={() => { setShowFlavors(false); setPendingVariant(null); setPendingSauces([]); }}
         />
       )}
     <motion.div
@@ -736,7 +545,6 @@ interface ProductGridProps {
   products: Product[];
   categories: Category[];
   loading: boolean;
-  allProducts: Product[];
 }
 
 const gridVariants = {
@@ -744,7 +552,7 @@ const gridVariants = {
   visible: { transition: { staggerChildren: 0.03 } },
 };
 
-export function ProductGrid({ products, categories, loading, allProducts }: ProductGridProps) {
+export function ProductGrid({ products, categories, loading }: ProductGridProps) {
   if (loading) {
     return (
       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
@@ -781,7 +589,7 @@ export function ProductGrid({ products, categories, loading, allProducts }: Prod
       className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2"
     >
       <AnimatePresence mode="popLayout">
-        {products.map(p => <ProductCard key={p.id} product={p} categories={categories} allProducts={allProducts} />)}
+        {products.map(p => <ProductCard key={p.id} product={p} categories={categories} />)}
       </AnimatePresence>
     </motion.div>
   );

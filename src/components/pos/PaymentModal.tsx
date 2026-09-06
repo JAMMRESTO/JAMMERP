@@ -8,9 +8,8 @@ import {
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
-import { printDeferredReceipt, type EscposDeferredReceiptData } from '../../lib/escpos';
-import { useToast } from '../ui/Toast';
-import type { PaymentMethod } from '../../types/database';
+import { esc, fmtNum, fmtAmt, THERMAL_CSS, buildThermalHeader, printViaIframe } from '../../lib/printUtils';
+import type { PaymentMethod, SaleItem, Sale } from '../../types/database';
 
 const methods: { id: PaymentMethod; label: string; icon: LucideIcon; color: string }[] = [
   { id: 'cash', label: 'Espèces', icon: Banknote, color: '#10B981' },
@@ -25,6 +24,11 @@ interface PaymentEntry {
   reference: string;
 }
 
+const saleTypeLabels: Record<string, string> = {
+  dine_in:  'Sur place',
+  takeaway: 'Commandes client',
+  delivery: 'Vente directe',
+};
 
 interface PaymentModalProps {
   onClose: () => void;
@@ -32,11 +36,97 @@ interface PaymentModalProps {
   onDeferred: () => void;
 }
 
+function printDeferredTicket(
+  sale: Sale,
+  items: SaleItem[],
+  settings: { restaurant_name: string; address?: string; phone?: string; currency_symbol: string; tax_rate: number; receipt_footer?: string; legal_form?: string; capital?: string; vat_number?: string; siret?: string },
+  saleType: string,
+  tableNumber: string,
+  customerName: string,
+  cashierName: string,
+  subtotal: number,
+  taxAmount: number,
+  discountAmount: number,
+  total: number,
+) {
+  const sym = settings.currency_symbol;
+  const fmt = (n: number) => fmtAmt(n, sym);
+  const dateObj = new Date(sale.created_at);
+  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const row = (left: string, right: string, large = false) =>
+    `<div class="row${large ? ' total-row' : ''}"><span class="lbl">${esc(left)}</span><span class="val">${esc(right)}</span></div>`;
+
+  const headerHtml = buildThermalHeader(settings);
+
+  const pendingBanner = `<div class="banner">*** EN ATTENTE DE PAIEMENT ***</div>`;
+
+  const metaHtml = [
+    row(`Ticket N° : ${sale.sale_number}`, ''),
+    row(`Date : ${dateStr}`, `Heure : ${timeStr}`),
+    ...(tableNumber ? [row(`Table : ${tableNumber}`, `Serveur : ${cashierName}`)] : [row(`Serveur :`, cashierName)]),
+    ...(customerName ? [row('Client :', customerName)] : []),
+    ...(saleType !== 'dine_in' ? [row('Mode :', saleTypeLabels[saleType] ?? saleType)] : []),
+    `<hr class="sep">`,
+  ].join('\n');
+
+  const colHeaderHtml = `<div class="col-header"><span class="qty">Qté</span><span class="desc">Désignation</span><span class="pu">P.U.</span><span class="ttl">Total</span></div>`;
+
+  const itemsHtml = items.map(item => {
+    const variant = item.variant_label
+      ? `<div class="item-sub">[${esc(item.variant_label)}]</div>`
+      : '';
+    const saucesLine = item.sauces && Array.isArray(item.sauces) && item.sauces.length > 0
+      ? `<div class="item-sub">&#8627; Sauces : ${esc((item.sauces as { name: string }[]).map(s => s.name).join(', '))}</div>`
+      : '';
+    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}${saucesLine}`;
+  }).join('');
+
+  const totalsHtml = [
+    `<hr class="sep">`,
+    ...(discountAmount > 0 ? [row('Sous-total', fmt(subtotal)), row('Remise', `- ${fmt(discountAmount)}`)] : []),
+    row(`TVA (${settings.tax_rate}%)`, fmt(taxAmount)),
+    `<hr class="sep-solid">`,
+    row('TOTAL TTC', fmt(total), true),
+    `<hr class="sep-solid">`,
+    `<div class="center" style="font-size:12px;font-weight:700;padding:3px 0;">À RÉGLER ULTÉRIEUREMENT</div>`,
+    `<hr class="sep">`,
+  ].join('\n');
+
+  const footerHtml = [
+    `<div class="footer">${esc(settings.receipt_footer || 'Merci de votre visite !')}</div>`,
+    `<div class="footer">À bientôt.</div>`,
+    `<hr class="sep">`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Ticket #${sale.sale_number} (attente)</title>
+  <style>${THERMAL_CSS}</style>
+</head>
+<body>
+  ${headerHtml}
+  ${pendingBanner}
+  ${metaHtml}
+  ${colHeaderHtml}
+  ${itemsHtml}
+  ${totalsHtml}
+  ${footerHtml}
+  <script>window.addEventListener('load',function(){window.print();window.addEventListener('afterprint',function(){window.close();});});<\/script>
+</body>
+</html>`;
+
+  printViaIframe(html);
+}
+
 export function PaymentModal({ onClose, onSuccess, onDeferred }: PaymentModalProps) {
-  const { total, subtotal, taxAmount, discountAmount, completeSale, deferSale, isPendingResume, saleType, tableNumber, customerName, selectedCustomer, cart } = usePOS();
+  const { total, subtotal, taxAmount, discountAmount, completeSale, deferSale, isPendingResume, saleType, tableNumber, customerName, cart } = usePOS();
   const { settings } = useSettings();
   const { currentUser } = useAuth();
-  const { toast } = useToast();
   const sym = settings.currency_symbol;
 
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('cash');
@@ -72,33 +162,12 @@ export function PaymentModal({ onClose, onSuccess, onDeferred }: PaymentModalPro
     const result = await deferSale();
     setLoading(false);
     if (result) {
-      const receiptData: EscposDeferredReceiptData = {
-        saleNumber: result.sale.sale_number,
-        createdAt: result.sale.created_at,
-        saleType,
-        tableNumber,
-        cashierName: currentUser?.name ?? 'Caissier',
-        customerName: selectedCustomer?.name || customerName,
-        customerPhone: selectedCustomer?.phone ?? null,
-        customerAddress: selectedCustomer?.address ?? null,
-        items: result.items.map(item => ({
-          quantity: item.quantity,
-          product_name: item.product_name,
-          unit_price: item.unit_price,
-          subtotal: item.subtotal,
-          variant_label: item.variant_label,
-          sauces: item.sauces as { name: string; price_supplement?: number }[] | null,
-          flavors: null,
-        })),
-        subtotal,
-        taxAmount,
-        discountAmount,
-        total,
-      };
-      const ok = await printDeferredReceipt(receiptData, settings);
-      if (!ok) {
-        toast('error', 'Echec impression ticket en attente. Verifiez l\'imprimante Zadig.');
-      }
+      printDeferredTicket(
+        result.sale, result.items, settings,
+        saleType, tableNumber, customerName,
+        currentUser?.name ?? 'Caissier',
+        subtotal, taxAmount, discountAmount, total,
+      );
       onDeferred();
     }
   }

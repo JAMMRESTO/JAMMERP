@@ -1,36 +1,26 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar, MobileSidebar, isPageAllowed, navConfig } from './Sidebar';
 import { Header } from './Header';
 import { useAuth } from '../../context/AuthContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useTenant } from '../../context/TenantContext';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
+import { Dashboard } from '../../pages/Dashboard';
+import { SettingsPage } from '../../pages/SettingsPage';
+import { POSPage } from '../../pages/POSPage';
+import { InventoryPage } from '../../pages/InventoryPage';
+import { ProductsPage } from '../../pages/ProductsPage';
+import { CategoriesPage } from '../../pages/CategoriesPage';
+import { TablesPage } from '../../pages/TablesPage';
+import { KitchenPage } from '../../pages/KitchenPage';
+import { DeliveryPage } from '../../pages/DeliveryPage';
+import { ProductionPage } from '../../pages/ProductionPage';
+import { ReportsPage } from '../../pages/ReportsPage';
+import { OnlineOrdersPage } from '../../pages/OnlineOrdersPage';
+import { CashSessionsPage } from '../../pages/CashSessionsPage';
+import { PurchasingPage } from '../../pages/PurchasingPage';
+import { ExpensesPage } from '../../pages/ExpensesPage';
 import { ComingSoon } from '../ui/ComingSoon';
-import { Loader2 } from 'lucide-react';
-
-const Dashboard = lazy(() => import('../../pages/Dashboard').then(m => ({ default: m.Dashboard })));
-const SettingsPage = lazy(() => import('../../pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const POSPage = lazy(() => import('../../pages/POSPage').then(m => ({ default: m.POSPage })));
-const InventoryPage = lazy(() => import('../../pages/InventoryPage').then(m => ({ default: m.InventoryPage })));
-const ProductsPage = lazy(() => import('../../pages/ProductsPage').then(m => ({ default: m.ProductsPage })));
-const CategoriesPage = lazy(() => import('../../pages/CategoriesPage').then(m => ({ default: m.CategoriesPage })));
-const TablesPage = lazy(() => import('../../pages/TablesPage').then(m => ({ default: m.TablesPage })));
-const KitchenPage = lazy(() => import('../../pages/KitchenPage').then(m => ({ default: m.KitchenPage })));
-const DeliveryPage = lazy(() => import('../../pages/DeliveryPage').then(m => ({ default: m.DeliveryPage })));
-const ProductionPage = lazy(() => import('../../pages/ProductionPage').then(m => ({ default: m.ProductionPage })));
-const ReportsPage = lazy(() => import('../../pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
-const OnlineOrdersPage = lazy(() => import('../../pages/OnlineOrdersPage').then(m => ({ default: m.OnlineOrdersPage })));
-const CashSessionsPage = lazy(() => import('../../pages/CashSessionsPage').then(m => ({ default: m.CashSessionsPage })));
-const PurchasingPage = lazy(() => import('../../pages/PurchasingPage').then(m => ({ default: m.PurchasingPage })));
-const ExpensesPage = lazy(() => import('../../pages/ExpensesPage').then(m => ({ default: m.ExpensesPage })));
-
-function PageLoader() {
-  return (
-    <div className="h-full flex items-center justify-center">
-      <Loader2 size={24} className="animate-spin text-white/30" />
-    </div>
-  );
-}
 
 export function MainLayout() {
   const { currentUser } = useAuth();
@@ -45,6 +35,7 @@ export function MainLayout() {
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // If the active page becomes forbidden (role change or module disabled), redirect to dashboard
   useEffect(() => {
     const item = navConfig.find(n => n.id === activePage);
     if (item && !isPageAllowed(item, roleName, activeModules, isTenantOwner)) {
@@ -84,14 +75,17 @@ export function MainLayout() {
 
   return (
     <div className="flex h-screen bg-gray-950 overflow-hidden">
+      {/* Desktop sidebar - full width */}
       <div className="hidden lg:flex">
         <Sidebar activePage={activePage} onNavigate={handleNavigate} />
       </div>
 
+      {/* Tablet sidebar - collapsed icons only */}
       <div className="hidden md:flex lg:hidden">
         <Sidebar activePage={activePage} onNavigate={handleNavigate} collapsed />
       </div>
 
+      {/* Mobile sidebar - drawer */}
       <MobileSidebar
         activePage={activePage}
         onNavigate={handleNavigate}
@@ -99,13 +93,12 @@ export function MainLayout() {
         onClose={() => setMobileMenuOpen(false)}
       />
 
+      {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {!isPOS && <Header activePage={activePage} onMenuToggle={() => setMobileMenuOpen(true)} />}
         <main className={`flex-1 ${isPOS || isFullHeight ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           <ErrorBoundary key={activePage} onReset={() => setActivePage('dashboard')}>
-            <Suspense fallback={<PageLoader />}>
-              {renderPage()}
-            </Suspense>
+            {renderPage()}
           </ErrorBoundary>
         </main>
       </div>

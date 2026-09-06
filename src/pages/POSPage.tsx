@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt, FileBarChart } from 'lucide-react';
+import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
-import { printCombined, printReceipt, openCashDrawer, filterKitchenCartItems, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
+import { printCombined, printReceipt, openCashDrawer, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
@@ -19,7 +19,6 @@ import { CustomerPickerModal } from '../components/pos/CustomerPickerModal';
 import { PendingTicketsModal } from '../components/pos/PendingTicketsModal';
 import { SalesHistoryModal } from '../components/pos/SalesHistoryModal';
 import { CashClosureModal } from '../components/pos/CashClosureModal';
-import { XReportReprintModal } from '../components/pos/XReportReprintModal';
 import { useToast } from '../components/ui/Toast';
 import type { Category, Product, SaleType, CashSession } from '../types/database';
 
@@ -90,52 +89,37 @@ function POSInner() {
   const [showPendingTickets, setShowPendingTickets] = useState(false);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [showCashClosure, setShowCashClosure] = useState(false);
-  const [showXReprint, setShowXReprint] = useState(false);
   const [sessionOpenedAt, setSessionOpenedAt] = useState<string>('');
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [sessionVersion, setSessionVersion] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Find or create an open cash session for this site
+  // Load session opening time from the last closed session
   useEffect(() => {
-    async function ensureOpenSession() {
+    async function loadSessionStart() {
       if (!siteId) return;
-      // Look for an existing open session
-      const { data: existing } = await supabase
+      const { data } = await supabase
         .from('cash_sessions')
-        .select('id, opened_at')
+        .select('closed_at')
         .eq('site_id', siteId)
-        .eq('status', 'open')
-        .order('opened_at', { ascending: false })
+        .eq('status', 'closed')
+        .order('closed_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (existing) {
-        setActiveSessionId(existing.id);
-        setSessionOpenedAt(existing.opened_at);
-        return;
-      }
-
-      // No open session — create one now with the real opening time
-      const now = new Date().toISOString();
-      const { data: created } = await supabase
-        .from('cash_sessions')
-        .insert({
-          site_id: siteId,
-          cashier_id: currentUser?.id ?? null,
-          opened_at: now,
-          status: 'open',
-        })
-        .select('id, opened_at')
-        .maybeSingle();
-
-      if (created) {
-        setActiveSessionId(created.id);
-        setSessionOpenedAt(created.opened_at);
+      if (data?.closed_at) {
+        setSessionOpenedAt(data.closed_at);
+        localStorage.setItem(`pos_session_opened_${siteId}`, data.closed_at);
+      } else {
+        // No prior session: use a far-back date to capture all sales
+        const fallback = '2020-01-01T00:00:00.000Z';
+        setSessionOpenedAt(fallback);
+        localStorage.setItem(`pos_session_opened_${siteId}`, fallback);
       }
     }
-    ensureOpenSession();
-  }, [siteId, currentUser?.id, sessionVersion]);
+    // Try localStorage first for instant display, then validate from DB
+    const cached = siteId ? localStorage.getItem(`pos_session_opened_${siteId}`) : null;
+    if (cached) setSessionOpenedAt(cached);
+    loadSessionStart();
+  }, [siteId]);
 
   const loadData = useCallback(async () => {
     if (!siteId) return;
@@ -209,14 +193,13 @@ function POSInner() {
         discountAmount,
         total: usePOSTotal,
       };
-      const kitchenItems = filterKitchenCartItems(cart, categories);
       const kitchenData: EscposKitchenData = {
         createdAt: result.sale.created_at,
         saleType,
         tableNumber,
         customerName: selectedCustomer ? selectedCustomer.name : customerName,
         orderNotes,
-        items: kitchenItems.map(item => ({
+        items: cart.map(item => ({
           quantity: item.quantity,
           product_name: item.product.name,
           variant_label: item.variant_label,
@@ -227,11 +210,7 @@ function POSInner() {
       };
 
       if (settings.print_kitchen_with_receipt) {
-        if (kitchenItems.length > 0) {
-          printCombined(kitchenData, receiptData, settings);
-        } else {
-          printReceipt(receiptData, settings);
-        }
+        printCombined(kitchenData, receiptData, settings);
       } else {
         printReceipt(receiptData, settings);
       }
@@ -386,18 +365,6 @@ function POSInner() {
           </button>
         )}
 
-        {/* X report reprint button */}
-        <button
-          onClick={() => setShowXReprint(true)}
-          className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-[10px] sm:text-xs font-medium transition-all flex-shrink-0
-            bg-white/4 border-white/10 text-white/40 hover:text-white/70 hover:border-white/20"
-          title="Réimprimer un X de caisse"
-        >
-          <FileBarChart size={12} className="sm:hidden" />
-          <FileBarChart size={13} className="hidden sm:block" />
-          <span className="hidden sm:inline">Réimpr. X</span>
-        </button>
-
         {/* Cash closure button */}
         <button
           onClick={() => setShowCashClosure(true)}
@@ -472,13 +439,13 @@ function POSInner() {
           </div>
           {/* Extra bottom padding on mobile so products aren't hidden behind cart bar */}
           <div className={`flex-1 overflow-y-auto px-3 sm:px-4 scrollbar-thin ${itemCount > 0 ? 'pb-24 lg:pb-4' : 'pb-3 sm:pb-4'}`}>
-            <ProductGrid products={filteredProducts} categories={categories} loading={loading} allProducts={products} />
+            <ProductGrid products={filteredProducts} categories={categories} loading={loading} />
           </div>
         </div>
 
         {/* Right: cart panel (desktop only) */}
         <div className="hidden lg:block w-72 xl:w-80 flex-shrink-0">
-          <CartPanel categories={categories} onCheckout={() => setShowPayment(true)} />
+          <CartPanel onCheckout={() => setShowPayment(true)} />
         </div>
       </div>
 
@@ -569,7 +536,7 @@ function POSInner() {
                 <div className="w-10 h-1 rounded-full bg-white/20" />
               </div>
               <div className="pt-6 h-full" style={{ maxHeight: '85vh' }}>
-                <CartPanel categories={categories} onCheckout={() => { setShowCartMobile(false); setShowPayment(true); }} />
+                <CartPanel onCheckout={() => { setShowCartMobile(false); setShowPayment(true); }} />
               </div>
             </motion.div>
           </>
@@ -628,21 +595,15 @@ function POSInner() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showXReprint && (
-          <XReportReprintModal onClose={() => setShowXReprint(false)} />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
         {showCashClosure && sessionOpenedAt && (
           <CashClosureModal
-            sessionId={activeSessionId}
             openedAt={sessionOpenedAt}
             onClose={() => setShowCashClosure(false)}
             onClosed={(_session: CashSession) => {
               setShowCashClosure(false);
-              setActiveSessionId(null);
-              setSessionVersion(v => v + 1);
+              const now = new Date().toISOString();
+              setSessionOpenedAt(now);
+              if (siteId) localStorage.setItem(`pos_session_opened_${siteId}`, now);
             }}
           />
         )}

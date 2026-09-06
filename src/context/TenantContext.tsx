@@ -211,7 +211,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     ]);
     if (!tenantData || !siteData) return;
     setTenant(tenantData as Tenant);
-    setOwnerPinState((tenantData as any).owner_pin ?? '');
     const site = siteData as Site;
     setSites([site]);
     setCurrentSite(site);
