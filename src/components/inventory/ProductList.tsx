@@ -45,7 +45,7 @@ interface ProductRowProps {
   product: Product;
   category: Category | undefined;
   onEdit: (p: Product) => void;
-  onDelete: (id: string) => void;
+  onDelete: (product: Product) => void;
   onToggleAvailable: (p: Product) => void;
 }
 
@@ -132,7 +132,7 @@ function ProductRow({ product, category, onEdit, onDelete, onToggleAvailable }: 
           <Pencil size={13} className="hidden sm:block" />
         </button>
         <button
-          onClick={() => onDelete(product.id)}
+          onClick={() => onDelete(product)}
           className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all"
         >
           <Trash2 size={11} className="sm:hidden" />
@@ -162,6 +162,7 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
   const [showImportModal, setShowImportModal] = useState(false);
   const [importPreview, setImportPreview] = useState<Array<Record<string, string>>>([]);
   const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const catMap = new Map(categories.map(c => [c.id, c]));
@@ -181,10 +182,12 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
   const lowStockCount = products.filter(p => p.track_stock && p.stock !== null && p.stock > 0 && p.stock <= p.low_stock_threshold).length;
   const outStockCount = products.filter(p => p.track_stock && (p.stock ?? 0) <= 0).length;
 
-  async function handleDelete(id: string) {
-    const { error } = await supabase.from('products').delete().eq('id', id);
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const { error } = await supabase.from('products').delete().eq('id', deleteTarget.id);
     if (error) { toast('error', 'Impossible de supprimer ce produit'); return; }
-    toast('success', 'Produit supprimé');
+    toast('success', `${deleteTarget.name} supprimé`);
+    setDeleteTarget(null);
     onRefresh();
   }
 
@@ -544,7 +547,7 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
                 product={p}
                 category={p.category_id ? catMap.get(p.category_id) : undefined}
                 onEdit={onEdit}
-                onDelete={handleDelete}
+                onDelete={(p) => setDeleteTarget(p)}
                 onToggleAvailable={handleToggleAvailable}
               />
             ))}
@@ -642,6 +645,56 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
                   >
                     {importing && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                     {importing ? 'Import en cours...' : `Importer ${importPreview.length} produit(s)`}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete confirmation modal */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setDeleteTarget(null)}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 8 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 8 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-gray-900 border border-white/10 rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden"
+            >
+              <div className="p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-xl bg-red-500/15 border border-red-500/25 flex items-center justify-center flex-shrink-0">
+                    <Trash2 size={18} className="text-red-400" />
+                  </div>
+                  <div>
+                    <p className="text-white font-semibold text-sm">Supprimer ce produit ?</p>
+                    <p className="text-white/40 text-xs mt-0.5">Cette action est irréversible.</p>
+                  </div>
+                </div>
+                <p className="text-white/60 text-sm mb-4">
+                  Êtes-vous sûr de vouloir supprimer <span className="text-white font-medium">{deleteTarget.name}</span> ? Il sera retiré de la liste des produits et ne pourra plus être vendu.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setDeleteTarget(null)}
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm hover:bg-white/5 transition-all"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={confirmDelete}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium shadow-lg shadow-red-600/25 transition-all"
+                  >
+                    Supprimer
                   </button>
                 </div>
               </div>

@@ -76,7 +76,7 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
     setNewVariantPrice('');
   }
 
-  const SUGGESTED_SIZES = ['Petite', 'Moyenne', 'Grande', 'Simple', 'Menu'];
+  const SUGGESTED_SIZES = ['Petite', 'Moyenne', 'Grande', 'Seul', 'Menu'];
   const hasVariants = form.variants.length > 0;
 
   function addSuggestedSize(label: string) {
