@@ -6,6 +6,7 @@ import { useTenant } from '../../context/TenantContext';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
 import { usePrinter } from '../../context/PrinterContext';
+import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../ui/Toast';
 import { AdminPinModal } from './AdminPinModal';
 import { printReceipt, printCancelledReceipt, type EscposReceiptData, type EscposCancelledReceiptData } from '../../lib/escpos';
@@ -53,8 +54,11 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
   const { cancelSale } = usePOS();
   const { settings } = useSettings();
   const { connected: printerConnected } = usePrinter();
+  const { currentUser } = useAuth();
   const { toast } = useToast();
   const sym = settings.currency_symbol;
+
+  const isAdmin = !!currentUser?.role?.permissions?.all;
 
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,12 +77,18 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
     setLoading(true);
     const start = new Date(dateStr + 'T00:00:00');
     const end = new Date(dateStr + 'T23:59:59.999');
-    const { data } = await supabase
+    let query = supabase
       .from('sales')
       .select('*')
       .eq('site_id', siteId)
       .gte('created_at', start.toISOString())
-      .lte('created_at', end.toISOString())
+      .lte('created_at', end.toISOString());
+
+    if (!isAdmin && currentUser?.id) {
+      query = query.eq('cashier_id', currentUser.id);
+    }
+
+    const { data } = await query
       .order('created_at', { ascending: false })
       .limit(100);
 
@@ -104,7 +114,7 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
     }
 
     setLoading(false);
-  }, [siteId]);
+  }, [siteId, isAdmin, currentUser?.id]);
 
   useEffect(() => {
     loadSales(selectedDate);
@@ -273,7 +283,10 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
                 </div>
                 <div>
                   <h2 className="text-white font-bold text-base">Historique des ventes</h2>
-                  <p className="text-white/40 text-xs mt-0.5 capitalize">{formatDateLabel(selectedDate)} · {sales.length} vente{sales.length > 1 ? 's' : ''}</p>
+                  <p className="text-white/40 text-xs mt-0.5 capitalize">
+                    {formatDateLabel(selectedDate)} · {sales.length} vente{sales.length > 1 ? 's' : ''}
+                    {isAdmin ? ' · Toutes les ventes' : ' · Mes ventes'}
+                  </p>
                 </div>
               </div>
               <button

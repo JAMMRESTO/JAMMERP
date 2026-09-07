@@ -764,8 +764,8 @@ export function Dashboard() {
               <SiteComparisonBar stats={siteStats} sym={sym} />
             )}
 
-            {/* Charts row */}
-            <div className={`grid grid-cols-1 ${showMultiView ? 'xl:grid-cols-5' : 'lg:grid-cols-5'} gap-2 sm:gap-3 lg:gap-4`}>
+            {/* Charts row — hidden on mobile to save space */}
+            <div className={`hidden lg:grid grid-cols-1 ${showMultiView ? 'xl:grid-cols-5' : 'lg:grid-cols-5'} gap-2 sm:gap-3 lg:gap-4`}>
               {/* Area chart */}
               <motion.div
                 initial={{ opacity: 0, y: 16 }}
