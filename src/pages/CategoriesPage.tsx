@@ -26,6 +26,7 @@ export function CategoriesPage() {
     onInsert: (row) => setCategories(c => c.some(x => x.id === row.id) ? c : [...c, row].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))),
     onUpdate: (row) => setCategories(c => c.map(x => x.id === row.id ? row : x)),
     onDelete: (row) => setCategories(c => c.filter(x => x.id !== row.id)),
+    onReconnect: () => { loadData(); },
   });
 
   if (loading) {

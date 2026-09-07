@@ -138,32 +138,40 @@ function DatePickerBar({ date, onChange, todayStr }: { date: string; onChange: (
     const d = new Date(ds + 'T00:00:00');
     return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
   };
+  const formatDateShort = (ds: string) => {
+    const d = new Date(ds + 'T00:00:00');
+    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  };
   const isToday = date === todayStr;
   return (
-    <div className="flex items-center gap-2 glass-card rounded-2xl px-3 py-2 border border-white/8 flex-shrink-0">
+    <div className="flex items-center gap-1.5 sm:gap-2 glass-card rounded-2xl px-2 sm:px-3 py-2 border border-white/8 flex-shrink-0 flex-wrap sm:flex-nowrap">
       <Calendar size={14} className="text-white/30 hidden sm:block" />
       <button
         onClick={() => shift(-1)}
-        className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-white/60 hover:text-white transition-all flex-shrink-0"
+        className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-white/60 hover:text-white transition-all flex-shrink-0"
       >
         <ChevronLeft size={16} />
       </button>
-      <div className="flex flex-col items-center min-w-0">
-        <span className="text-white text-xs sm:text-sm font-semibold truncate">{formatDate(date)}</span>
+      <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-none">
+        <span className="text-white text-xs sm:text-sm font-semibold truncate">
+          <span className="sm:hidden">{formatDateShort(date)}</span>
+          <span className="hidden sm:inline">{formatDate(date)}</span>
+        </span>
       </div>
       <button
         onClick={() => shift(1)}
         disabled={date >= todayStr}
-        className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-white/60 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+        className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-white/60 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
       >
         <ChevronRight size={16} />
       </button>
       {!isToday && (
         <button
           onClick={() => onChange(todayStr)}
-          className="px-2.5 py-1.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-[11px] font-semibold transition-all whitespace-nowrap flex-shrink-0"
+          className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-[10px] sm:text-[11px] font-semibold transition-all whitespace-nowrap flex-shrink-0"
         >
-          Aujourd'hui
+          <span className="sm:hidden">Auj.</span>
+          <span className="hidden sm:inline">Aujourd'hui</span>
         </button>
       )}
       <input
@@ -171,7 +179,7 @@ function DatePickerBar({ date, onChange, todayStr }: { date: string; onChange: (
         value={date}
         max={todayStr}
         onChange={(e) => e.target.value && onChange(e.target.value)}
-        className="w-8 h-8 rounded-lg bg-white/5 border border-white/8 text-[10px] text-white/50 hover:text-white cursor-pointer transition-all [color-scheme:dark] flex-shrink-0"
+        className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-white/5 border border-white/8 text-[10px] text-white/50 hover:text-white cursor-pointer transition-all [color-scheme:dark] flex-shrink-0"
         style={{ colorScheme: 'dark' }}
       />
     </div>
@@ -346,6 +354,8 @@ export function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [detailTab, setDetailTab]   = useState<DetailTab>('categories');
   const [expandedCashier, setExpandedCashier] = useState<string | null>(null);
+  const [cashierProductsCache, setCashierProductsCache] = useState<Record<string, ProductPoint[]>>({});
+  const [loadingCashierId, setLoadingCashierId] = useState<string | null>(null);
 
   // Global date — defaults to today
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -353,6 +363,8 @@ export function Dashboard() {
 
   const load = useCallback(async () => {
     setRefreshing(true);
+    setCashierProductsCache({});
+    setExpandedCashier(null);
     const selected   = selDate;
     const dayBefore  = new Date(new Date(selected + 'T00:00:00').getTime() - 86400000).toISOString().slice(0, 10);
     const weekAgo    = new Date(new Date(selected + 'T00:00:00').getTime() - 7 * 86400000).toISOString().slice(0, 10);
@@ -507,9 +519,6 @@ export function Dashboard() {
     const catMap: Record<string, { value: number; qty: number }> = {};
     // Product aggregation
     const prodMap: Record<string, { qty: number; revenue: number }> = {};
-    // Cashier-product aggregation
-    const cashierProdMap: Record<string, Record<string, { qty: number; revenue: number }>> = {};
-
     (saleItems ?? []).forEach((item: {
       subtotal: number; quantity: number; product_name: string;
       product: { category: { name: string } | null } | null;
@@ -524,11 +533,6 @@ export function Dashboard() {
       prodMap[item.product_name].qty += item.quantity;
       prodMap[item.product_name].revenue += item.subtotal;
 
-      const cKey = item.sale?.cashier_id ?? '__unknown__';
-      if (!cashierProdMap[cKey]) cashierProdMap[cKey] = {};
-      if (!cashierProdMap[cKey][item.product_name]) cashierProdMap[cKey][item.product_name] = { qty: 0, revenue: 0 };
-      cashierProdMap[cKey][item.product_name].qty += item.quantity;
-      cashierProdMap[cKey][item.product_name].revenue += item.subtotal;
     });
 
     // Set category data
@@ -539,19 +543,45 @@ export function Dashboard() {
     const sortedProds = Object.entries(prodMap).sort(([,a],[,b]) => b.revenue - a.revenue);
     setProdData(sortedProds.map(([name, v], i) => ({ name, qty: v.qty, revenue: v.revenue, color: PRODUCT_COLORS[i % PRODUCT_COLORS.length] })));
 
-    // Merge product breakdown into userRevenues
-    setUserRevenues(prev => prev.map(u => {
-      const key = u.cashier_id ?? '__unknown__';
-      const prods = cashierProdMap[key];
-      if (!prods) return { ...u, products: [] };
-      const products: ProductPoint[] = Object.entries(prods)
-        .map(([name, v]) => ({ name, qty: v.qty, revenue: v.revenue, color: '#3B82F6' }))
-        .sort((a, b) => b.qty - a.qty);
-      return { ...u, products };
-    }));
   }, [isTenantOwnerView, isMultiSite, sites, currentSite]);
 
   useEffect(() => { loadDetailData(selDate); }, [loadDetailData, selDate]);
+
+  // ─── Lazy-load product breakdown for a single cashier on demand ───
+  const loadCashierProducts = useCallback(async (cashierKey: string, dateStr: string) => {
+    const querySitesDetail: Site[] = isTenantOwnerView && isMultiSite ? sites : [currentSite!].filter(Boolean);
+    const detailSiteIds = querySitesDetail.map(s => s.id);
+    const dsf = (q: ReturnType<typeof supabase.from>) =>
+      detailSiteIds.length === 1 ? q.eq('site_id', detailSiteIds[0]) : q.in('site_id', detailSiteIds);
+
+    setLoadingCashierId(cashierKey);
+    let query = dsf(
+      supabase.from('sale_items')
+        .select('subtotal, quantity, product_name, sale:sales!inner(cashier_id)')
+        .eq('sale.status', 'paid')
+        .gte('sale.created_at', dateStr + 'T00:00:00')
+        .lte('sale.created_at', dateStr + 'T23:59:59')
+    );
+    if (cashierKey !== '__unknown__') {
+      query = query.eq('sale.cashier_id', cashierKey);
+    } else {
+      query = query.is('sale.cashier_id', null);
+    }
+    const { data } = await query;
+
+    const prodMap: Record<string, { qty: number; revenue: number }> = {};
+    (data ?? []).forEach((item: { subtotal: number; quantity: number; product_name: string }) => {
+      if (!prodMap[item.product_name]) prodMap[item.product_name] = { qty: 0, revenue: 0 };
+      prodMap[item.product_name].qty += item.quantity;
+      prodMap[item.product_name].revenue += item.subtotal;
+    });
+    const products: ProductPoint[] = Object.entries(prodMap)
+      .map(([name, v]) => ({ name, qty: v.qty, revenue: v.revenue, color: '#3B82F6' }))
+      .sort((a, b) => b.qty - a.qty);
+
+    setCashierProductsCache(prev => ({ ...prev, [cashierKey]: products }));
+    setLoadingCashierId(null);
+  }, [isTenantOwnerView, isMultiSite, sites, currentSite]);
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -1022,7 +1052,17 @@ export function Dashboard() {
                           return (
                             <div key={u.cashier_id ?? '__unknown__'}>
                               <button
-                                onClick={() => setExpandedCashier(isExpanded ? null : (u.cashier_id ?? '__unknown__'))}
+                                onClick={() => {
+                                  const key = u.cashier_id ?? '__unknown__';
+                                  if (isExpanded) {
+                                    setExpandedCashier(null);
+                                  } else {
+                                    setExpandedCashier(key);
+                                    if (!cashierProductsCache[key]) {
+                                      loadCashierProducts(key, selDate);
+                                    }
+                                  }
+                                }}
                                 className="w-full flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-3 hover:bg-white/3 transition-colors text-left"
                               >
                                 <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden" style={{ backgroundColor: barColor + '30', border: `1px solid ${barColor}40` }}>
@@ -1043,40 +1083,64 @@ export function Dashboard() {
                                 </div>
                               </button>
                               <AnimatePresence>
-                                {isExpanded && u.products.length > 0 && (
-                                  <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: 'auto', opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="overflow-hidden bg-white/2"
-                                  >
-                                    <div className="px-4 sm:px-5 py-2 border-t border-white/5">
-                                      <p className="text-white/30 text-[10px] font-medium uppercase tracking-wider mb-2">Produits vendus ({u.products.length})</p>
-                                      <div className="space-y-1.5 max-h-48 overflow-y-auto scrollbar-thin">
-                                        {u.products.map((p, pi) => (
-                                          <div key={pi} className="flex items-center justify-between gap-2 py-1">
-                                            <span className="text-white/60 text-xs truncate flex-1 min-w-0">{p.name}</span>
-                                            <span className="text-white/40 text-[10px] flex-shrink-0">×{p.qty}</span>
-                                            <span className="text-white/70 text-xs font-medium tabular-nums flex-shrink-0 w-20 text-right">{p.revenue.toLocaleString('fr-FR')}</span>
+                                {(() => {
+                                  const key = u.cashier_id ?? '__unknown__';
+                                  const cached = cashierProductsCache[key];
+                                  if (isExpanded && loadingCashierId === key) {
+                                    return (
+                                      <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        className="overflow-hidden bg-white/2"
+                                      >
+                                        <div className="px-4 sm:px-5 py-3 flex flex-col items-center gap-1.5">
+                                          <RefreshCw size={14} className="text-white/30 animate-spin" />
+                                          <p className="text-white/30 text-xs">Chargement des produits...</p>
+                                        </div>
+                                      </motion.div>
+                                    );
+                                  }
+                                  if (isExpanded && cached && cached.length > 0) {
+                                    return (
+                                      <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="overflow-hidden bg-white/2"
+                                      >
+                                        <div className="px-4 sm:px-5 py-2 border-t border-white/5">
+                                          <p className="text-white/30 text-[10px] font-medium uppercase tracking-wider mb-2">Produits vendus ({cached.length})</p>
+                                          <div className="space-y-1.5 max-h-48 overflow-y-auto scrollbar-thin">
+                                            {cached.map((p, pi) => (
+                                              <div key={pi} className="flex items-center justify-between gap-2 py-1">
+                                                <span className="text-white/60 text-xs truncate flex-1 min-w-0">{p.name}</span>
+                                                <span className="text-white/40 text-[10px] flex-shrink-0">×{p.qty}</span>
+                                                <span className="text-white/70 text-xs font-medium tabular-nums flex-shrink-0 w-20 text-right">{p.revenue.toLocaleString('fr-FR')}</span>
+                                              </div>
+                                            ))}
                                           </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  </motion.div>
-                                )}
-                                {isExpanded && u.products.length === 0 && (
-                                  <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: 'auto', opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    className="overflow-hidden bg-white/2"
-                                  >
-                                    <div className="px-4 sm:px-5 py-3 text-center">
-                                      <p className="text-white/30 text-xs">Chargement des produits...</p>
-                                    </div>
-                                  </motion.div>
-                                )}
+                                        </div>
+                                      </motion.div>
+                                    );
+                                  }
+                                  if (isExpanded && cached && cached.length === 0) {
+                                    return (
+                                      <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        className="overflow-hidden bg-white/2"
+                                      >
+                                        <div className="px-4 sm:px-5 py-3 text-center">
+                                          <p className="text-white/30 text-xs">Aucun produit vendu</p>
+                                        </div>
+                                      </motion.div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
                               </AnimatePresence>
                             </div>
                           );

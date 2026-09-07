@@ -166,6 +166,7 @@ function POSInner() {
       return (row.is_available || !row.track_stock) ? [...without, row].sort((a, b) => a.name.localeCompare(b.name)) : without;
     }),
     onDelete: (row) => setProducts(p => p.filter(x => x.id !== row.id)),
+    onReconnect: () => { loadData(); },
   });
 
   useRealtimeTable<Category>({
@@ -177,6 +178,7 @@ function POSInner() {
       return row.is_active ? [...without, row].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)) : without;
     }),
     onDelete: (row) => setCategories(c => c.filter(x => x.id !== row.id)),
+    onReconnect: () => { loadData(); },
   });
 
   const filteredProducts = useMemo(() => {

@@ -278,37 +278,49 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
             {/* Tailles / Portions */}
             <div>
               <label className="text-white/60 text-sm font-medium block mb-2">Tailles / Portions</label>
-              <div className="flex gap-2 mb-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] sm:flex gap-2 mb-2">
                 <input
                   type="text"
                   value={newVariant}
                   onChange={e => setNewVariant(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVariant(); } }}
                   placeholder="Ex: Petite, Moyenne..."
-                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+                  aria-label="Nom de la taille"
+                  className="min-w-0 w-full sm:flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-3 sm:py-2 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
                 />
-                <input
-                  id="variant-price-input"
-                  type="number"
-                  value={newVariantPrice}
-                  onChange={e => setNewVariantPrice(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVariant(); } }}
-                  placeholder="Prix *"
-                  min={0}
-                  step={50}
-                  className="w-24 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
-                />
-                <button type="button" onClick={addVariant} disabled={!newVariant.trim() || !newVariantPrice} className="px-3 py-2 rounded-xl bg-white/8 hover:bg-blue-600/30 text-white/60 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed">
-                  <Plus size={15} />
-                </button>
+                <div className="col-span-2 sm:contents flex gap-2">
+                  <input
+                    id="variant-price-input"
+                    type="number"
+                    inputMode="decimal"
+                    value={newVariantPrice}
+                    onChange={e => setNewVariantPrice(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVariant(); } }}
+                    placeholder="Prix *"
+                    aria-label="Prix de la taille"
+                    min={0}
+                    step={50}
+                    className="min-w-0 flex-1 sm:flex-none sm:w-24 bg-white/5 border border-white/10 rounded-xl px-3 py-3 sm:py-2 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={addVariant}
+                    disabled={!newVariant.trim() || !newVariantPrice}
+                    aria-label="Ajouter la taille"
+                    className="min-w-[48px] sm:min-w-0 sm:px-3 py-3 sm:py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/25 text-blue-200 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  >
+                    <Plus size={17} />
+                    <span className="sm:hidden text-xs font-semibold">Valider</span>
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-1.5 mb-2">
+              <div className="flex flex-wrap gap-1.5 mb-2">
                 {SUGGESTED_SIZES.map(s => (
                   <button
                     key={s}
                     type="button"
                     onClick={() => addSuggestedSize(s)}
-                    className="px-2.5 py-1 rounded-lg bg-blue-500/8 hover:bg-blue-500/20 border border-blue-500/15 hover:border-blue-500/30 text-blue-300 text-xs font-medium transition-all"
+                    className="min-h-9 px-3 py-1.5 rounded-lg bg-blue-500/8 hover:bg-blue-500/20 border border-blue-500/15 hover:border-blue-500/30 text-blue-300 text-xs font-medium transition-all"
                   >
                     {s}
                   </button>
@@ -317,20 +329,22 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
               {form.variants.length > 0 && (
                 <div className="space-y-1.5">
                   {form.variants.map((v, i) => (
-                    <div key={i} className="flex items-center gap-2 bg-blue-500/5 border border-blue-500/15 rounded-xl px-3 py-1.5">
-                      <span className="text-sm text-blue-200 flex-1 truncate">{v.label}</span>
+                    <div key={i} className="flex items-center gap-2 bg-blue-500/5 border border-blue-500/15 rounded-xl px-3 py-2">
+                      <span className="text-sm text-blue-200 flex-1 min-w-0 truncate">{v.label}</span>
                       <input
                         type="number"
+                        inputMode="decimal"
                         value={v.price ?? ''}
                         onChange={e => updateVariantPrice(i, e.target.value)}
                         placeholder={String(form.price || 0)}
+                        aria-label={`Prix de ${v.label}`}
                         min={0}
                         step={50}
-                        className="w-20 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs text-right placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
+                        className="w-24 sm:w-20 min-h-9 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-sm sm:text-xs text-right placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
                       />
                       <span className="text-white/30 text-xs flex-shrink-0">{settings?.currency_symbol ?? ''}</span>
-                      <button type="button" onClick={() => removeVariant(i)} className="text-blue-400/50 hover:text-red-400 transition-colors">
-                        <X size={13} />
+                      <button type="button" onClick={() => removeVariant(i)} aria-label={`Supprimer ${v.label}`} className="w-8 h-8 flex items-center justify-center text-blue-400/50 hover:text-red-400 transition-colors flex-shrink-0">
+                        <X size={15} />
                       </button>
                     </div>
                   ))}

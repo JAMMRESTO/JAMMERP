@@ -47,6 +47,7 @@ export function ProductsPage() {
     onInsert: (row) => setProducts(p => p.some(x => x.id === row.id) ? p : [...p, row].sort((a, b) => a.name.localeCompare(b.name))),
     onUpdate: (row) => setProducts(p => p.map(x => x.id === row.id ? row : x)),
     onDelete: (row) => setProducts(p => p.filter(x => x.id !== row.id)),
+    onReconnect: () => { loadData(); },
   });
 
   useRealtimeTable<Category>({
@@ -55,6 +56,7 @@ export function ProductsPage() {
     onInsert: (row) => setCategories(c => c.some(x => x.id === row.id) ? c : [...c, row].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))),
     onUpdate: (row) => setCategories(c => c.map(x => x.id === row.id ? row : x)),
     onDelete: (row) => setCategories(c => c.filter(x => x.id !== row.id)),
+    onReconnect: () => { loadData(); },
   });
 
   useRealtimeTable<Sauce>({
@@ -63,6 +65,7 @@ export function ProductsPage() {
     onInsert: (row) => setSauces(s => s.some(x => x.id === row.id) ? s : [...s, row].sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name))),
     onUpdate: (row) => setSauces(s => s.map(x => x.id === row.id ? row : x)),
     onDelete: (row) => setSauces(s => s.filter(x => x.id !== row.id)),
+    onReconnect: () => { loadData(); },
   });
 
   useRealtimeTable<Flavor>({
@@ -71,6 +74,7 @@ export function ProductsPage() {
     onInsert: (row) => setFlavors(f => f.some(x => x.id === row.id) ? f : [...f, row].sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name))),
     onUpdate: (row) => setFlavors(f => f.map(x => x.id === row.id ? row : x)),
     onDelete: (row) => setFlavors(f => f.filter(x => x.id !== row.id)),
+    onReconnect: () => { loadData(); },
   });
 
   const showingForm = editingProduct !== undefined;

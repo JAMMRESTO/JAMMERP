@@ -69,6 +69,26 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
   const [sauces, setSauces] = useState<Sauce[]>([]);
   const [flavors, setFlavors] = useState<Flavor[]>([]);
 
+  const reloadSaucesFlavors = useCallback(async () => {
+    if (!siteId) { setSauces([]); setFlavors([]); return; }
+    const { data: sauceData } = await supabase
+      .from('sauces')
+      .select('*')
+      .eq('site_id', siteId)
+      .eq('is_active', true)
+      .order('sort_order')
+      .order('name');
+    if (sauceData) setSauces(sauceData as Sauce[]);
+    const { data: flavorData } = await supabase
+      .from('flavors')
+      .select('*')
+      .eq('site_id', siteId)
+      .eq('is_active', true)
+      .order('sort_order')
+      .order('name');
+    if (flavorData) setFlavors(flavorData as Flavor[]);
+  }, [siteId]);
+
   useEffect(() => {
     if (!siteId) { setSauces([]); setFlavors([]); return; }
     let cancelled = false;
@@ -99,6 +119,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
     onInsert: (row) => { if (row.is_active) setSauces(s => s.some(x => x.id === row.id) ? s : [...s, row]); },
     onUpdate: (row) => setSauces(s => row.is_active ? (s.some(x => x.id === row.id) ? s.map(x => x.id === row.id ? row : x) : [...s, row]) : s.filter(x => x.id !== row.id)),
     onDelete: (row) => setSauces(s => s.filter(x => x.id !== row.id)),
+    onReconnect: () => { reloadSaucesFlavors(); },
   });
 
   useRealtimeTable<Flavor>({
@@ -107,6 +128,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
     onInsert: (row) => { if (row.is_active) setFlavors(s => s.some(x => x.id === row.id) ? s : [...s, row]); },
     onUpdate: (row) => setFlavors(s => row.is_active ? (s.some(x => x.id === row.id) ? s.map(x => x.id === row.id ? row : x) : [...s, row]) : s.filter(x => x.id !== row.id)),
     onDelete: (row) => setFlavors(s => s.filter(x => x.id !== row.id)),
+    onReconnect: () => { reloadSaucesFlavors(); },
   });
 
   const addToCart = useCallback((product: Product, variantLabel = '', variantPrice?: number, saucesForItem: SelectedSauce[] = [], flavorsForItem: SelectedFlavor[] = []) => {
