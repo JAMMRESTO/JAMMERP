@@ -12,6 +12,7 @@ import { printViaIframe, buildSaleReceiptHtml, buildCombinedKitchenAndReceiptHtm
 import { printCombined, printReceipt, type EscposKitchenData, type EscposReceiptData } from '../../lib/escpos';
 import { usePrinter } from '../../context/PrinterContext';
 import type { UserWithRole } from '../../types/database';
+import { formatVariantLabel } from '../../lib/variantLabel';
 
 const saleTypeLabels = {
   dine_in:  { label: 'Sur place',        icon: Utensils },
@@ -55,6 +56,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
         variant_label: i.variant_label,
         sauces: i.sauces ?? [],
         flavors: i.flavors ?? [],
+        menu_drink: (i as any).menu_drink ?? null,
       })),
       payments: lastPayments.map(p => ({ method: p.method, amount: p.amount })),
       subtotal,
@@ -75,6 +77,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
         sauces: i.sauces ?? [],
         flavors: i.flavors ?? [],
         kitchen_note: i.kitchen_note ?? '',
+        menu_drink: (i as any).menu_drink ?? null,
       })),
     };
 
@@ -101,6 +104,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
                 sauces: i.sauces ?? [],
                 flavors: i.flavors ?? [],
                 kitchen_note: i.kitchen_note ?? '',
+                menu_drink: (i as any).menu_drink ?? null,
               })),
             },
             receiptData,
@@ -174,7 +178,7 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
                     <span className="text-white/70">
                       <span className="text-white/40 mr-1">{item.quantity}x</span>
                       {item.product_name}
-                      {item.variant_label && <span className="text-white/30 text-xs ml-1">({item.variant_label})</span>}
+                      {(() => { const v = formatVariantLabel(item.variant_label); return v && <span className="text-white/30 text-xs ml-1">({v})</span>; })()}
                     </span>
                     {item.sauces && item.sauces.length > 0 && (
                       <p className="text-amber-300/80 text-[11px] mt-0.5">
@@ -184,6 +188,11 @@ export function ReceiptModal({ onClose, onNewSale }: ReceiptModalProps) {
                     {item.flavors && item.flavors.length > 0 && (
                       <p className="text-blue-300/80 text-[11px] mt-0.5">
                         ↳ {item.flavors.map(f => f.name).join(', ')}
+                      </p>
+                    )}
+                    {(item as any).menu_drink && (
+                      <p className="text-emerald-300/80 text-[11px] mt-0.5">
+                        ↳ {(item as any).menu_drink}
                       </p>
                     )}
                   </div>

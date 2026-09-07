@@ -4,6 +4,8 @@
  * and professional layout suitable for A4 and 80mm thermal printers.
  */
 
+import { formatVariantLabel } from './variantLabel';
+
 export const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -261,6 +263,7 @@ export interface SaleReceiptData {
     variant_label?: string | null;
     sauces?: { name: string; price_supplement?: number }[] | null;
     flavors?: { name: string }[] | null;
+    menu_drink?: string | null;
   }[];
   payments: { method: string; amount: number }[];
   subtotal: number;
@@ -316,8 +319,9 @@ export function buildSaleReceiptBody(
     `<div class="col-header"><span class="qty">Qté</span><span class="desc">Désignation</span><span class="pu">P.U.</span><span class="ttl">Total</span></div>`;
 
   const itemsHtml = data.items.map(item => {
-    const variant = item.variant_label
-      ? `<div class="item-sub">[${esc(item.variant_label)}]</div>`
+    const v = formatVariantLabel(item.variant_label);
+    const variant = v
+      ? `<div class="item-sub">[${esc(v)}]</div>`
       : '';
     const saucesLine = item.sauces && item.sauces.length > 0
       ? `<div class="item-sub">&#8627; Sauces : ${esc(item.sauces.map(s => s.name).join(', '))}</div>`
@@ -325,7 +329,10 @@ export function buildSaleReceiptBody(
     const flavorsLine = item.flavors && item.flavors.length > 0
       ? `<div class="item-sub">&#8627; Gouts : ${esc(item.flavors.map(f => f.name).join(', '))}</div>`
       : '';
-    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}${saucesLine}${flavorsLine}`;
+    const drinkLine = item.menu_drink
+      ? `<div class="item-sub">&#8627; Boisson : ${esc(item.menu_drink)}</div>`
+      : '';
+    return `<div class="item-row"><span class="qty">${item.quantity}x</span><span class="desc">${esc(item.product_name)}</span><span class="pu">${fmtNum(item.unit_price)}</span><span class="ttl">${fmtNum(item.subtotal)}</span></div>${variant}${saucesLine}${flavorsLine}${drinkLine}`;
   }).join('');
 
   const totalsHtml = [
@@ -367,6 +374,7 @@ export interface KitchenTicketData {
     sauces?: { name: string }[] | null;
     flavors?: { name: string }[] | null;
     kitchen_note?: string | null;
+    menu_drink?: string | null;
   }[];
 }
 
@@ -401,8 +409,9 @@ export function buildKitchenTicketBody(
   ].join('\n');
 
   const itemsHtml = data.items.map(item => {
-    const variant = item.variant_label
-      ? `<div style="font-size:11px;padding-left:28px;font-weight:700;">[${esc(item.variant_label)}]</div>`
+    const v = formatVariantLabel(item.variant_label);
+    const variant = v
+      ? `<div style="font-size:11px;padding-left:28px;font-weight:700;">[${esc(v)}]</div>`
       : '';
     const saucesLine = item.sauces && item.sauces.length > 0
       ? `<div style="font-size:13px;padding-left:28px;font-weight:700;">&#8627; Sauces : ${esc(item.sauces.map(s => s.name).join(', '))}</div>`
@@ -413,10 +422,13 @@ export function buildKitchenTicketBody(
     const note = item.kitchen_note
       ? `<div style="font-size:11px;padding-left:28px;font-style:italic;">&gt;&gt; ${esc(item.kitchen_note)}</div>`
       : '';
+    const drinkLine = item.menu_drink
+      ? `<div style="font-size:13px;padding-left:28px;font-weight:700;">&#8627; Boisson : ${esc(item.menu_drink)}</div>`
+      : '';
     return `<div class="item-row" style="font-size:14px;">
         <span class="qty" style="font-size:15px;">${item.quantity}x</span>
         <span class="desc" style="font-size:14px;white-space:normal;">${esc(item.product_name)}</span>
-      </div>${variant}${saucesLine}${flavorsLine}${note}`;
+      </div>${variant}${saucesLine}${flavorsLine}${drinkLine}${note}`;
   }).join('');
 
   const notesHtml = data.orderNotes && data.orderNotes.trim()

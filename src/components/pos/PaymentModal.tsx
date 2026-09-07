@@ -89,6 +89,7 @@ export function PaymentModal({ onClose, onSuccess, onDeferred }: PaymentModalPro
           variant_label: item.variant_label,
           sauces: item.sauces as { name: string; price_supplement?: number }[] | null,
           flavors: null,
+          menu_drink: (item as any).menu_drink ?? null,
         })),
         subtotal,
         taxAmount,

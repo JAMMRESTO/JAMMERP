@@ -12,6 +12,7 @@ import { printKitchenTicket, filterKitchenCartItems, type EscposKitchenData } fr
 import { usePrinter } from '../../context/PrinterContext';
 import { useToast } from '../ui/Toast';
 import type { CartItem, Category, SaleType } from '../../types/database';
+import { formatVariantLabel } from '../../lib/variantLabel';
 
 function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
   const { removeFromCart, updateQuantity, updateKitchenNote } = usePOS();
@@ -39,7 +40,7 @@ function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
           <p className="text-white text-[11px] sm:text-xs font-medium leading-tight truncate">{item.product.name}</p>
           <p className="text-white/40 text-[9px] sm:text-[10px] mt-0.5">
             {item.unit_price.toLocaleString('fr-FR')} {settings.currency_symbol}
-            {item.variant_label && <span className="ml-1" style={{ color: 'var(--color-primary)' }}>· {item.variant_label}</span>}
+            {(() => { const v = formatVariantLabel(item.variant_label); return v && <span className="ml-1" style={{ color: 'var(--color-primary)' }}>· {v}</span>; })()}
           </p>
           {item.sauces && item.sauces.length > 0 && (
             <p className="text-amber-300/80 text-[9px] sm:text-[10px] mt-0.5 truncate">
@@ -49,6 +50,11 @@ function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
           {item.flavors && item.flavors.length > 0 && (
             <p className="text-blue-300/80 text-[9px] sm:text-[10px] mt-0.5 truncate">
               ↳ {item.flavors.map(f => f.name).join(', ')}
+            </p>
+          )}
+          {item.menu_drink && (
+            <p className="text-emerald-300/80 text-[9px] sm:text-[10px] mt-0.5 truncate">
+              ↳ {item.menu_drink}
             </p>
           )}
         </div>
@@ -170,6 +176,7 @@ export function CartPanel({ onCheckout, categories }: CartPanelProps) {
         sauces: item.sauces,
         flavors: item.flavors,
         kitchen_note: item.kitchen_note,
+        menu_drink: item.menu_drink,
       })),
     };
     if (printerConnected) {

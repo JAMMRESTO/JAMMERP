@@ -12,6 +12,7 @@ import { AdminPinModal } from './AdminPinModal';
 import { printReceipt, printCancelledReceipt, type EscposReceiptData, type EscposCancelledReceiptData } from '../../lib/escpos';
 import { buildSaleReceiptHtml, buildCancelledReceiptHtml, printViaIframe } from '../../lib/printUtils';
 import type { Sale, SaleItem, Payment, UserWithRole } from '../../types/database';
+import { formatVariantLabel } from '../../lib/variantLabel';
 
 const saleTypeLabels: Record<string, { label: string; icon: typeof Utensils; color: string }> = {
   dine_in:  { label: 'Sur place',        icon: Utensils, color: 'text-blue-400' },
@@ -464,7 +465,7 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
                               <span className="text-white/50 text-xs font-mono flex-shrink-0 w-8">{item.quantity}x</span>
                               <div className="flex-1 min-w-0">
                                 <p className="text-white/80 text-xs font-medium">{item.product_name}</p>
-                                {item.variant_label && <p className="text-white/40 text-[10px] mt-0.5">{item.variant_label}</p>}
+                                {(() => { const v = formatVariantLabel(item.variant_label); return v && <p className="text-white/40 text-[10px] mt-0.5">{v}</p>; })()}
                                 {item.sauces && item.sauces.length > 0 && (
                                   <p className="text-white/40 text-[10px] mt-0.5">Sauces: {item.sauces.map(s => s.name).join(', ')}</p>
                                 )}

@@ -3,6 +3,8 @@
  * Sends raw ESC/POS commands directly — no print dialog, silent printing.
  */
 
+import { formatVariantLabel } from './variantLabel';
+
 // ─── ESC/POS command bytes ───
 
 const ESC = 0x1b;
@@ -284,6 +286,7 @@ export interface EscposKitchenData {
     sauces?: { name: string }[] | null;
     flavors?: { name: string }[] | null;
     kitchen_note?: string | null;
+    menu_drink?: string | null;
   }[];
 }
 
@@ -330,7 +333,8 @@ export function buildKitchenTicketBytes(data: EscposKitchenData): Uint8Array {
       parts.push(line(`   ${nameLine}`));
     }
     if (item.variant_label) {
-      parts.push(strBytes(`  > ${item.variant_label}\n`));
+      const v = formatVariantLabel(item.variant_label);
+      if (v) parts.push(strBytes(`  > ${v}\n`));
     }
     if (item.sauces && item.sauces.length > 0) {
       parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => s.name).join(', ')}\n`));
@@ -340,6 +344,9 @@ export function buildKitchenTicketBytes(data: EscposKitchenData): Uint8Array {
     }
     if (item.kitchen_note) {
       parts.push(BOLD_ON, strBytes(`  >> ${item.kitchen_note}\n`), BOLD_OFF);
+    }
+    if (item.menu_drink) {
+      parts.push(strBytes(`  > Boisson: ${item.menu_drink}\n`));
     }
   }
 
@@ -368,6 +375,7 @@ export interface EscposReceiptData {
     variant_label?: string | null;
     sauces?: { name: string; price_supplement?: number }[] | null;
     flavors?: { name: string }[] | null;
+    menu_drink?: string | null;
   }[];
   payments: { method: string; amount: number }[];
   subtotal: number;
@@ -458,6 +466,9 @@ export function buildReceiptBytes(
     }
     if (item.flavors && item.flavors.length > 0) {
       parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => printerSafeText(f.name)).join(', ')}\n`));
+    }
+    if (item.menu_drink) {
+      parts.push(strBytes(`  > Boisson: ${printerSafeText(item.menu_drink)}\n`));
     }
   }
 
@@ -855,6 +866,7 @@ export interface EscposDeferredReceiptData {
     variant_label?: string | null;
     sauces?: { name: string; price_supplement?: number }[] | null;
     flavors?: { name: string }[] | null;
+    menu_drink?: string | null;
   }[];
   subtotal: number;
   taxAmount: number;
@@ -928,6 +940,9 @@ export function buildDeferredReceiptBytes(
     }
     if (item.flavors && item.flavors.length > 0) {
       parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => printerSafeText(f.name)).join(', ')}\n`));
+    }
+    if (item.menu_drink) {
+      parts.push(strBytes(`  > Boisson: ${printerSafeText(item.menu_drink)}\n`));
     }
   }
 

@@ -24,7 +24,7 @@ interface POSContextType {
   setSelectedCustomer: (c: Customer | null) => void;
   setOrderNotes: (v: string) => void;
   setDiscountAmount: (v: number) => void;
-  addToCart: (product: Product, variantLabel?: string, variantPrice?: number, sauces?: SelectedSauce[], flavors?: SelectedFlavor[]) => void;
+  addToCart: (product: Product, variantLabel?: string, variantPrice?: number, sauces?: SelectedSauce[], flavors?: SelectedFlavor[], menuDrink?: string | null) => void;
   removeFromCart: (itemId: string) => void;
   updateQuantity: (itemId: string, qty: number) => void;
   updateKitchenNote: (itemId: string, note: string) => void;
@@ -131,7 +131,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
     onReconnect: () => { reloadSaucesFlavors(); },
   });
 
-  const addToCart = useCallback((product: Product, variantLabel = '', variantPrice?: number, saucesForItem: SelectedSauce[] = [], flavorsForItem: SelectedFlavor[] = []) => {
+  const addToCart = useCallback((product: Product, variantLabel = '', variantPrice?: number, saucesForItem: SelectedSauce[] = [], flavorsForItem: SelectedFlavor[] = [], menuDrink: string | null = null) => {
     const unitPrice = variantPrice ?? product.price;
     const sauceKey = [...saucesForItem].map(s => s.id).sort().join(',');
     const flavorKey = [...flavorsForItem].map(f => f.id).sort().join(',');
@@ -141,6 +141,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
           && i.variant_label === variantLabel
           && [...i.sauces].map(s => s.id).sort().join(',') === sauceKey
           && [...i.flavors].map(f => f.id).sort().join(',') === flavorKey
+          && (i.menu_drink ?? null) === (menuDrink ?? null)
       );
       if (existing) {
         return prev.map(i =>
@@ -156,6 +157,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
         unit_price: unitPrice,
         sauces: saucesForItem,
         flavors: flavorsForItem,
+        menu_drink: menuDrink,
       }];
     });
   }, []);
@@ -237,6 +239,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       kitchen_note: i.kitchen_note,
       sauces: i.sauces ?? [],
       flavors: i.flavors ?? [],
+      menu_drink: i.menu_drink ?? null,
     }));
 
     const { data: itemsData } = await supabase
@@ -299,6 +302,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       kitchen_note: i.kitchen_note,
       sauces: i.sauces ?? [],
       flavors: i.flavors ?? [],
+      menu_drink: i.menu_drink ?? null,
     }));
 
     const { data: itemsData } = await supabase
@@ -344,6 +348,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       unit_price: si.unit_price,
       sauces: Array.isArray(si.sauces) ? (si.sauces as SelectedSauce[]) : [],
       flavors: Array.isArray(si.flavors) ? (si.flavors as SelectedFlavor[]) : [],
+      menu_drink: (si as any).menu_drink ?? null,
     }));
 
     setCart(newCart);

@@ -14,6 +14,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useTenant } from '../context/TenantContext';
 import { useSettings } from '../context/SettingsContext';
+import { formatItemDisplayName } from '../lib/variantLabel';
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -735,7 +736,7 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
     setLoading(true);
     const { data } = await supabase
       .from('sale_items')
-      .select('product_name, quantity, subtotal, sale:sales!inner(created_at, status)')
+      .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status)')
       .eq('sale.site_id', siteId)
       .gte('sale.created_at', range.from + 'T00:00:00')
       .lte('sale.created_at', range.to + 'T23:59:59')
@@ -743,10 +744,11 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
 
     if (data) {
       const map: Record<string, { total_qty: number; total_revenue: number }> = {};
-      (data as { product_name: string; quantity: number; subtotal: number }[]).forEach(item => {
-        if (!map[item.product_name]) map[item.product_name] = { total_qty: 0, total_revenue: 0 };
-        map[item.product_name].total_qty += item.quantity;
-        map[item.product_name].total_revenue += item.subtotal;
+      (data as { product_name: string; variant_label: string | null; quantity: number; subtotal: number }[]).forEach(item => {
+        const displayName = formatItemDisplayName(item.product_name, item.variant_label);
+        if (!map[displayName]) map[displayName] = { total_qty: 0, total_revenue: 0 };
+        map[displayName].total_qty += item.quantity;
+        map[displayName].total_revenue += item.subtotal;
       });
       setItems(
         Object.entries(map)

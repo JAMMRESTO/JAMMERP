@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt, FileBarChart } from 'lucide-react';
+import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt, FileBarChart, Menu } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
 import { printCombined, printReceipt, openCashDrawer, filterKitchenCartItems, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
@@ -29,7 +29,7 @@ const saleTypes: { id: SaleType; label: string; icon: typeof Utensils }[] = [
   { id: 'takeaway', label: 'Commandes client', icon: Package },
 ];
 
-function POSInner() {
+function POSInner({ onMenuToggle }: { onMenuToggle: () => void }) {
   const {
     cart, itemCount, clearCart, saleType, setSaleType,
     tableNumber, setTableNumber,
@@ -270,6 +270,13 @@ function POSInner() {
     <div className="h-full flex flex-col overflow-hidden bg-gray-950">
       {/* POS Top Bar */}
       <div className="flex-shrink-0 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-2.5 bg-gray-900/80 border-b border-white/8">
+        {/* Mobile menu button */}
+        <button
+          onClick={onMenuToggle}
+          className="md:hidden w-8 h-8 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-all flex-shrink-0"
+        >
+          <Menu size={16} />
+        </button>
         {/* Search */}
         <div className="flex-1 relative max-w-full sm:max-w-md">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
@@ -654,11 +661,11 @@ function POSInner() {
   );
 }
 
-export function POSPage() {
+export function POSPage({ onMenuToggle }: { onMenuToggle: () => void }) {
   const { settings } = useSettings();
   return (
     <POSProvider taxRate={settings.tax_rate}>
-      <POSInner />
+      <POSInner onMenuToggle={onMenuToggle} />
     </POSProvider>
   );
 }

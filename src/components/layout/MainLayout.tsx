@@ -65,7 +65,7 @@ export function MainLayout() {
     switch (activePage) {
       case 'dashboard': return <Dashboard />;
       case 'settings': return <SettingsPage />;
-      case 'pos': return <POSPage />;
+      case 'pos': return <POSPage onMenuToggle={() => setMobileMenuOpen(true)} />;
       case 'products': return <ProductsPage />;
       case 'categories': return <CategoriesPage />;
       case 'inventory': return <InventoryPage />;

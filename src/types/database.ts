@@ -427,6 +427,7 @@ export interface CartItem {
   unit_price: number;
   sauces: SelectedSauce[];
   flavors: SelectedFlavor[];
+  menu_drink?: string | null;
 }
 
 // ============================================================

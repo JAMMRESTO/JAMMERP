@@ -1,0 +1,1 @@
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS menu_drink text;

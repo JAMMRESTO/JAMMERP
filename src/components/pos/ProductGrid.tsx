@@ -495,8 +495,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
   const [showVariants, setShowVariants] = useState(false);
   const [pendingVariant, setPendingVariant] = useState<{ label: string; price?: number } | null>(null);
   const [showMenuDrink, setShowMenuDrink] = useState(false);
-  const [pendingDrink, setPendingDrink] = useState<Product | null>(null);
-  const [pendingDrinkVariant, setPendingDrinkVariant] = useState('');
+  const [pendingDrinkLabel, setPendingDrinkLabel] = useState<string | null>(null);
   const [showSauces, setShowSauces] = useState(false);
   const [showFlavors, setShowFlavors] = useState(false);
   const [pendingSauces, setPendingSauces] = useState<SelectedSauce[]>([]);
@@ -563,26 +562,26 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
 
   function handleMenuDrinkConfirm(drink: Product, drinkVariant: string) {
     setShowMenuDrink(false);
-    addMainAndDrink(drink, drinkVariant);
+    const drinkLabel = drinkVariant ? `${drink.name} ${drinkVariant}` : drink.name;
+    addMainAndDrink(drinkLabel);
   }
 
-  function addMainAndDrink(drink: Product, drinkVariant: string) {
+  function addMainAndDrink(drinkLabel: string) {
     const v = pendingVariant ?? { label: '', price: undefined };
     setPendingVariant(null);
-    setPendingDrink(drink);
-    setPendingDrinkVariant(drinkVariant);
     if (needsSauce && availableSauces.length > 0) {
       setPendingVariant(v);
+      setPendingDrinkLabel(drinkLabel);
       setShowSauces(true);
       return;
     }
     if (needsFlavor && availableFlavors.length > 0) {
       setPendingVariant(v);
+      setPendingDrinkLabel(drinkLabel);
       setShowFlavors(true);
       return;
     }
-    finalize(v.label, v.price, [], []);
-    flushPendingDrink(drink, drinkVariant);
+    finalize(v.label, v.price, [], [], drinkLabel);
   }
 
   function handleSaucesConfirm(selected: SelectedSauce[]) {
@@ -594,8 +593,8 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
     }
     const v = pendingVariant ?? { label: '', price: undefined };
     setPendingVariant(null);
-    finalize(v.label, v.price, selected, []);
-    flushPendingDrink(pendingDrink, pendingDrinkVariant);
+    finalize(v.label, v.price, selected, [], pendingDrinkLabel);
+    setPendingDrinkLabel(null);
   }
 
   function handleFlavorsConfirm(selected: SelectedFlavor[]) {
@@ -603,20 +602,12 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
     setShowFlavors(false);
     setPendingVariant(null);
     setPendingSauces([]);
-    finalize(v.label, v.price, pendingSauces, selected);
-    flushPendingDrink(pendingDrink, pendingDrinkVariant);
+    finalize(v.label, v.price, pendingSauces, selected, pendingDrinkLabel);
+    setPendingDrinkLabel(null);
   }
 
-  function flushPendingDrink(drink: Product | null, drinkVariant: string) {
-    if (drink) {
-      addToCart(drink, drinkVariant ? `${drinkVariant} - Inclus menu` : 'Inclus menu', 0, [], []);
-      setPendingDrink(null);
-      setPendingDrinkVariant('');
-    }
-  }
-
-  function finalize(variant: string, price: number | undefined, saucesForItem: SelectedSauce[], flavorsForItem: SelectedFlavor[]) {
-    addToCart(product, variant, price, saucesForItem, flavorsForItem);
+  function finalize(variant: string, price: number | undefined, saucesForItem: SelectedSauce[], flavorsForItem: SelectedFlavor[], menuDrink: string | null = null) {
+    addToCart(product, variant, price, saucesForItem, flavorsForItem, menuDrink);
     setAdded(true);
     setTimeout(() => setAdded(false), 600);
   }
@@ -638,7 +629,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
           product={product}
           drinks={drinkProducts}
           onConfirm={handleMenuDrinkConfirm}
-          onClose={() => { setShowMenuDrink(false); setPendingVariant(null); setPendingDrink(null); setPendingDrinkVariant(''); }}
+          onClose={() => { setShowMenuDrink(false); setPendingVariant(null); setPendingDrinkLabel(null); }}
         />
       )}
       {showSauces && (
@@ -648,7 +639,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
           required={Boolean(category?.sauce_required)}
           maxCount={Math.min(3, Math.max(1, category?.sauce_count ?? 1))}
           onConfirm={handleSaucesConfirm}
-          onClose={() => { setShowSauces(false); setPendingVariant(null); setPendingDrink(null); setPendingDrinkVariant(''); }}
+          onClose={() => { setShowSauces(false); setPendingVariant(null); setPendingDrinkLabel(null); }}
         />
       )}
       {showFlavors && (
@@ -658,7 +649,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
           required={Boolean(category?.flavor_required)}
           maxCount={Math.min(3, Math.max(1, category?.flavor_count ?? 1))}
           onConfirm={handleFlavorsConfirm}
-          onClose={() => { setShowFlavors(false); setPendingVariant(null); setPendingSauces([]); setPendingDrink(null); setPendingDrinkVariant(''); }}
+          onClose={() => { setShowFlavors(false); setPendingVariant(null); setPendingSauces([]); setPendingDrinkLabel(null); }}
         />
       )}
     <motion.div

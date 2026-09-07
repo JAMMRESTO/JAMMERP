@@ -13,6 +13,7 @@ import { useSettings } from '../../context/SettingsContext';
 import { usePrinter } from '../../context/PrinterContext';
 import { useToast } from '../ui/Toast';
 import { printXReport } from '../../lib/escpos';
+import { formatItemDisplayName } from '../../lib/variantLabel';
 import type { PaymentMethod, CashSession } from '../../types/database';
 
 interface SalesSummary {
@@ -133,7 +134,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
             .in('sale_id', saleIds),
           supabase
             .from('sale_items')
-            .select('sale_id, quantity, product_name')
+            .select('sale_id, quantity, product_name, variant_label')
             .eq('site_id', siteId)
             .in('sale_id', saleIds),
           supabase
@@ -166,7 +167,8 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
           const userName = cashierId ? (cashierNameMap[cashierId] ?? 'UTILISATEUR NON RENSEIGNÉ') : 'UTILISATEUR NON RENSEIGNÉ';
           if (!userProductMap.has(userName)) userProductMap.set(userName, new Map());
           const productMap = userProductMap.get(userName)!;
-          productMap.set(item.product_name, (productMap.get(item.product_name) ?? 0) + item.quantity);
+          const displayName = formatItemDisplayName(item.product_name, (item as any).variant_label);
+          productMap.set(displayName, (productMap.get(displayName) ?? 0) + item.quantity);
         }
         byUser = Array.from(userProductMap.entries()).map(([name, productMap]) => ({
           name,
