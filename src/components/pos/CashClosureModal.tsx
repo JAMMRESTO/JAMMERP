@@ -20,6 +20,7 @@ interface SalesSummary {
   sales_count: number;
   by_method: Record<PaymentMethod, number>;
   by_category: { name: string; count: number; total: number }[];
+  by_user: { name: string; products: { name: string; qty: number }[] }[];
 }
 
 interface CashClosureModalProps {
@@ -60,6 +61,7 @@ async function printXCaisse(params: {
         card: session.total_card,
       },
       byCategory: summary.by_category,
+      byUser: summary.by_user,
       openingBalance: session.opening_balance,
       expectedCash: session.expected_cash,
       actualCash: session.actual_cash,
@@ -94,7 +96,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
   const { toast } = useToast();
 
   const [step, setStep] = useState<'review' | 'preview' | 'count' | 'confirm' | 'done'>('review');
-  const [summary, setSummary] = useState<SalesSummary>({ total_sales: 0, sales_count: 0, by_method: { cash: 0, wave: 0, orange_money: 0, card: 0 }, by_category: [] });
+  const [summary, setSummary] = useState<SalesSummary>({ total_sales: 0, sales_count: 0, by_method: { cash: 0, wave: 0, orange_money: 0, card: 0 }, by_category: [], by_user: [] });
   const [openingBalance, setOpeningBalance] = useState('');
   const [actualCash, setActualCash] = useState('');
   const [notes, setNotes] = useState('');
@@ -120,8 +122,10 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
       const byMethod: Record<PaymentMethod, number> = { cash: 0, wave: 0, orange_money: 0, card: 0 };
       let byCategory: { name: string; count: number; total: number }[] = [];
 
+      let byUser: { name: string; products: { name: string; qty: number }[] }[] = [];
+
       if (saleIds.length > 0) {
-        const [{ data: paymentsData }, { data: itemsData }] = await Promise.all([
+        const [{ data: paymentsData }, { data: itemsData }, { data: salesWithCashier }] = await Promise.all([
           supabase
             .from('payments')
             .select('method, amount')
@@ -129,18 +133,58 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
             .in('sale_id', saleIds),
           supabase
             .from('sale_items')
-            .select('quantity, subtotal, product:products(category:categories(name))')
+            .select('sale_id, quantity, product_name')
             .eq('site_id', siteId)
             .in('sale_id', saleIds),
+          supabase
+            .from('sales')
+            .select('id, cashier_id')
+            .eq('site_id', siteId)
+            .in('id', saleIds),
         ]);
+
+        const cashierIds = [...new Set((salesWithCashier ?? []).map(s => s.cashier_id).filter(Boolean))] as string[];
+        let cashierNameMap: Record<string, string> = {};
+        if (cashierIds.length > 0) {
+          const { data: usersData } = await supabase
+            .from('users')
+            .select('id, name')
+            .in('id', cashierIds);
+          for (const u of usersData ?? []) {
+            cashierNameMap[u.id] = u.name;
+          }
+        }
+
+        const saleCashierMap: Record<string, string> = {};
+        for (const s of salesWithCashier ?? []) {
+          saleCashierMap[s.id] = s.cashier_id ?? '';
+        }
+
+        const userProductMap = new Map<string, Map<string, number>>();
+        for (const item of itemsData ?? []) {
+          const cashierId = saleCashierMap[item.sale_id] ?? '';
+          const userName = cashierId ? (cashierNameMap[cashierId] ?? 'UTILISATEUR NON RENSEIGNÉ') : 'UTILISATEUR NON RENSEIGNÉ';
+          if (!userProductMap.has(userName)) userProductMap.set(userName, new Map());
+          const productMap = userProductMap.get(userName)!;
+          productMap.set(item.product_name, (productMap.get(item.product_name) ?? 0) + item.quantity);
+        }
+        byUser = Array.from(userProductMap.entries()).map(([name, productMap]) => ({
+          name,
+          products: Array.from(productMap.entries()).map(([pname, qty]) => ({ name: pname, qty })).sort((a, b) => b.qty - a.qty),
+        }));
 
         for (const p of paymentsData ?? []) {
           byMethod[p.method as PaymentMethod] = (byMethod[p.method as PaymentMethod] ?? 0) + p.amount;
         }
 
-        // Aggregate by category
+        const { data: itemsWithCat } = await supabase
+          .from('sale_items')
+          .select('quantity, subtotal, product:products(category:categories(name))')
+          .eq('site_id', siteId)
+          .in('sale_id', saleIds);
+
         const catMap = new Map<string, { count: number; total: number }>();
-        for (const item of itemsData ?? []) {
+        for (const item of itemsWithCat ?? []) {
           const catName = (item as any).product?.category?.name ?? 'Sans categorie';
           const existing = catMap.get(catName) ?? { count: 0, total: 0 };
           existing.count += item.quantity;
@@ -152,7 +196,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
           .sort((a, b) => b.total - a.total);
       }
 
-      setSummary({ total_sales: totalSales, sales_count: saleIds.length, by_method: byMethod, by_category: byCategory });
+      setSummary({ total_sales: totalSales, sales_count: saleIds.length, by_method: byMethod, by_category: byCategory, by_user: byUser });
       setLoading(false);
     }
     loadSummary();
@@ -449,6 +493,28 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                                   <span className="text-white font-semibold text-xs flex-shrink-0 ml-2">
                                     {fmt(cat.total, sym)}
                                   </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Détail des produits par utilisateur */}
+                        {summary.by_user.length > 0 && (
+                          <div>
+                            <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Détail des produits par utilisateur</p>
+                            <div className="space-y-2">
+                              {summary.by_user.map(user => (
+                                <div key={user.name} className="bg-white/3 rounded-xl border border-white/5 overflow-hidden">
+                                  <p className="text-white/80 text-xs font-semibold px-3 py-2 bg-white/4 border-b border-white/5">{user.name}</p>
+                                  <div className="px-3 py-1">
+                                    {user.products.map(prod => (
+                                      <div key={prod.name} className="flex items-center justify-between py-1">
+                                        <span className="text-white/60 text-xs truncate flex-1 min-w-0">{prod.name}</span>
+                                        <span className="text-white/80 text-xs font-semibold ml-2 flex-shrink-0">{prod.qty}</span>
+                                      </div>
+                                    ))}
+                                  </div>
                                 </div>
                               ))}
                             </div>

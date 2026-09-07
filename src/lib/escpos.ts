@@ -547,6 +547,7 @@ export interface EscposXReportData {
     card: number;
   };
   byCategory: { name: string; count: number; total: number }[];
+  byUser: { name: string; products: { name: string; qty: number }[] }[];
   openingBalance: number;
   expectedCash: number;
   actualCash: number;
@@ -626,6 +627,21 @@ export function buildXReportBytes(
     parts.push(BOLD_ON, line('VENTES PAR CATEGORIE'), BOLD_OFF);
     for (const cat of data.byCategory) {
       parts.push(strBytes(padLine(`${cat.name} (${cat.count})`, fmt(cat.total))));
+    }
+    parts.push(dashedLine());
+  }
+
+  if (data.byUser.length > 0) {
+    parts.push(BOLD_ON, line('DETAIL DES PRODUITS PAR UTILISATEUR'), BOLD_OFF);
+    for (const user of data.byUser) {
+      parts.push(BOLD_ON, line(user.name), BOLD_OFF);
+      for (const product of user.products) {
+        const productLines = wrapPrinterText(product.name, RECEIPT_WIDTH - 6);
+        parts.push(strBytes(padLine(productLines[0], String(product.qty))));
+        for (const productLine of productLines.slice(1)) {
+          parts.push(line(`  ${productLine}`));
+        }
+      }
     }
     parts.push(dashedLine());
   }

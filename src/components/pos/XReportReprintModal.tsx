@@ -19,6 +19,7 @@ interface SalesSummary {
   sales_count: number;
   by_method: Record<PaymentMethod, number>;
   by_category: { name: string; count: number; total: number }[];
+  by_user: { name: string; products: { name: string; qty: number }[] }[];
 }
 
 function toDateInput(d: Date): string {
@@ -88,10 +89,11 @@ export function XReportReprintModal({ onClose }: XReportReprintModalProps) {
   async function loadSummaryForSession(session: CashSession): Promise<SalesSummary> {
     const byMethod: Record<PaymentMethod, number> = { cash: 0, wave: 0, orange_money: 0, card: 0 };
     let byCategory: { name: string; count: number; total: number }[] = [];
+    let byUser: { name: string; products: { name: string; qty: number }[] }[] = [];
 
     const { data: salesData } = await supabase
       .from('sales')
-      .select('id, total')
+      .select('id, total, cashier_id')
       .eq('site_id', siteId)
       .eq('status', 'paid')
       .gte('paid_at', session.opened_at)
@@ -103,8 +105,29 @@ export function XReportReprintModal({ onClose }: XReportReprintModalProps) {
     if (saleIds.length > 0) {
       const [{ data: paymentsData }, { data: itemsData }] = await Promise.all([
         supabase.from('payments').select('method, amount').eq('site_id', siteId).in('sale_id', saleIds),
-        supabase.from('sale_items').select('quantity, subtotal, product:products(category:categories(name))').eq('site_id', siteId).in('sale_id', saleIds),
+        supabase.from('sale_items').select('sale_id, quantity, product_name, subtotal, product:products(category:categories(name))').eq('site_id', siteId).in('sale_id', saleIds),
       ]);
+
+      const cashierIds = [...new Set((salesData ?? []).map(s => s.cashier_id).filter(Boolean))] as string[];
+      const cashierNameMap: Record<string, string> = {};
+      if (cashierIds.length > 0) {
+        const { data: usersData } = await supabase.from('users').select('id, name').in('id', cashierIds);
+        for (const user of usersData ?? []) cashierNameMap[user.id] = user.name;
+      }
+
+      const userProductMap = new Map<string, Map<string, number>>();
+      const saleCashierMap = new Map((salesData ?? []).map(sale => [sale.id, sale.cashier_id ?? '']));
+      for (const item of itemsData ?? []) {
+        const cashierId = saleCashierMap.get(item.sale_id) ?? '';
+        const userName = cashierId ? (cashierNameMap[cashierId] ?? 'UTILISATEUR NON RENSEIGNÉ') : 'UTILISATEUR NON RENSEIGNÉ';
+        if (!userProductMap.has(userName)) userProductMap.set(userName, new Map());
+        const productMap = userProductMap.get(userName)!;
+        productMap.set(item.product_name, (productMap.get(item.product_name) ?? 0) + item.quantity);
+      }
+      byUser = Array.from(userProductMap.entries()).map(([name, productMap]) => ({
+        name,
+        products: Array.from(productMap.entries()).map(([productName, qty]) => ({ name: productName, qty })).sort((a, b) => b.qty - a.qty),
+      }));
 
       for (const p of paymentsData ?? []) {
         byMethod[p.method as PaymentMethod] = (byMethod[p.method as PaymentMethod] ?? 0) + p.amount;
@@ -121,7 +144,7 @@ export function XReportReprintModal({ onClose }: XReportReprintModalProps) {
       byCategory = Array.from(catMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a, b) => b.total - a.total);
     }
 
-    return { total_sales: totalSales, sales_count: saleIds.length, by_method: byMethod, by_category: byCategory };
+    return { total_sales: totalSales, sales_count: saleIds.length, by_method: byMethod, by_category: byCategory, by_user: byUser };
   }
 
   async function handleReprint(session: CashSession) {
@@ -145,6 +168,7 @@ export function XReportReprintModal({ onClose }: XReportReprintModalProps) {
               card: session.total_card,
             },
             byCategory: summary.by_category,
+            byUser: summary.by_user,
             openingBalance: session.opening_balance,
             expectedCash: session.expected_cash,
             actualCash: session.actual_cash,
