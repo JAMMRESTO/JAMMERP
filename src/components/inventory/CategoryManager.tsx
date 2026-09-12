@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Salad, Utensils, Flame, Fish, GlassWater, Cake, Sandwich,
-  Coffee, Package, BarChart3, type LucideIcon
+  Coffee, Package, BarChart3, AlertTriangle, type LucideIcon
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../ui/Toast';
@@ -273,6 +273,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
   const [editingId, setEditingId] = useState<string | null>(null);
   const [sauces, setSauces] = useState<Sauce[]>([]);
   const [flavors, setFlavors] = useState<Flavor[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<Category | null>(null);
 
   useEffect(() => {
     if (!siteId) return;
@@ -302,10 +303,12 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
     onRefresh();
   }
 
-  async function handleDelete(id: string) {
-    const { error } = await supabase.from('categories').delete().eq('id', id);
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    const { error } = await supabase.from('categories').delete().eq('id', pendingDelete.id);
     if (error) { toast('error', 'Impossible de supprimer cette catégorie'); return; }
     toast('success', 'Catégorie supprimée');
+    setPendingDelete(null);
     onRefresh();
   }
 
@@ -399,7 +402,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                     <Pencil size={14} />
                   </button>
                   <button
-                    onClick={() => handleDelete(cat.id)}
+                    onClick={() => setPendingDelete(cat)}
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all"
                   >
                     <Trash2 size={14} />
@@ -410,6 +413,52 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
           })}
         </AnimatePresence>
       </div>
+
+      <AnimatePresence>
+        {pendingDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setPendingDelete(null)}
+          >
+            <motion.div
+n            initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl"
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-11 h-11 rounded-xl bg-red-500/15 border border-red-500/30 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle size={20} className="text-red-400" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-white font-semibold text-base">Supprimer la catégorie</h3>
+                  <p className="text-white/50 text-sm mt-1">
+                    Voulez-vous vraiment supprimer la categorie <span className="text-white font-medium">{pendingDelete.name}</span> ? Cette action est irreversible. Les produits de cette categorie seront detachés mais conservés.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-5">
+                <button
+                  onClick={() => setPendingDelete(null)}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white text-sm font-medium transition-all"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-all shadow-lg shadow-red-600/25"
+                >
+                  Supprimer
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
