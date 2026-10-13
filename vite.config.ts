@@ -1,34 +1,58 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { writeFileSync } from 'fs';
-import { resolve } from 'path';
-
-function buildVersionPlugin() {
-  return {
-    name: 'build-version',
-    buildStart() {
-      const version = Date.now().toString(36);
-      writeFileSync(
-        resolve(__dirname, 'public/build-version.json'),
-        JSON.stringify({ v: version, t: Date.now() })
-      );
-    },
-  };
-}
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  plugins: [react(), buildVersionPlugin()],
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'supabase': ['@supabase/supabase-js'],
-          'charts': ['recharts'],
-          'icons': ['lucide-react'],
-          'animation': ['framer-motion'],
-        },
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'prompt',
+      includeAssets: ['icons/*.png', 'icons/*.svg'],
+      manifest: {
+        name: 'THE WEST AFRICAN - Gestion Restaurant',
+        short_name: 'THE WEST AFRICAN',
+        description: 'Application de gestion pour restaurant : commandes, impression, caisse',
+        start_url: '/',
+        display: 'standalone',
+        orientation: 'any',
+        background_color: '#111827',
+        theme_color: '#d97706',
+        categories: ['business', 'food'],
+        icons: [
+          { src: '/icons/icon-72.png', sizes: '72x72', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-96.png', sizes: '96x96', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-128.png', sizes: '128x128', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-144.png', sizes: '144x144', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-152.png', sizes: '152x152', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+          { src: '/icons/icon-384.png', sizes: '384x384', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+        ],
+        shortcuts: [
+          { name: 'Commandes', url: '/', description: 'Gérer les commandes en salle' },
+        ],
       },
-    },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        skipWaiting: false,
+        clientsClaim: false,
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'supabase-cache',
+              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 },
+            },
+          },
+        ],
+      },
+      devOptions: {
+        enabled: true,
+      },
+    }),
+  ],
+  optimizeDeps: {
+    exclude: ['lucide-react'],
   },
 });

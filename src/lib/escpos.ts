@@ -1,973 +1,287 @@
-/**
- * ESC/POS thermal printer utility for Epson USB printers via WebUSB.
- * Sends raw ESC/POS commands directly — no print dialog, silent printing.
- */
+export type PaperWidth = 58 | 80;
 
-import { formatVariantLabel } from './variantLabel';
+export interface EscPosLayout {
+  width: PaperWidth;
+  columns: number;
+}
 
-// ─── ESC/POS command bytes ───
+export const LAYOUT_58: EscPosLayout = { width: 58, columns: 32 };
+export const LAYOUT_80: EscPosLayout = { width: 80, columns: 48 };
+
+export function layoutForWidth(width: PaperWidth): EscPosLayout {
+  return width === 58 ? LAYOUT_58 : LAYOUT_80;
+}
 
 const ESC = 0x1b;
 const GS = 0x1d;
-const LF = 0x0a;
 
 const INIT = new Uint8Array([ESC, 0x40]);
-const FEED = (n: number) => new Uint8Array([ESC, 0x64, n]);
-// Full cut (GS V 0) — supported by all Epson TM-series. Partial cut (GS V 1)
-// is silently ignored by many models, so we default to full cut.
-const CUT = new Uint8Array([GS, 0x56, 0x00]);
-const FULL_CUT = new Uint8Array([GS, 0x56, 0x00]);
-
-// Text styles
 const BOLD_ON = new Uint8Array([ESC, 0x45, 0x01]);
 const BOLD_OFF = new Uint8Array([ESC, 0x45, 0x00]);
-const DOUBLE_ON = new Uint8Array([GS, 0x21, 0x11]); // double width + height
-const DOUBLE_OFF = new Uint8Array([GS, 0x21, 0x00]);
-const LARGE_ON = new Uint8Array([GS, 0x21, 0x22]); // larger
-const LARGE_OFF = new Uint8Array([GS, 0x21, 0x00]);
+const DOUBLE_ON = new Uint8Array([ESC, 0x21, 0x30]);
+const DOUBLE_OFF = new Uint8Array([ESC, 0x21, 0x00]);
+const SMALL_ON = new Uint8Array([ESC, 0x21, 0x01]);
+const SMALL_OFF = new Uint8Array([ESC, 0x21, 0x00]);
 const CENTER = new Uint8Array([ESC, 0x61, 0x01]);
 const LEFT = new Uint8Array([ESC, 0x61, 0x00]);
-const RIGHT = new Uint8Array([ESC, 0x61, 0x02]);
+const CUT = new Uint8Array([GS, 0x56, 0x42, 0x00]);
+const FEED_LINES = (n: number) => new Uint8Array([ESC, 0x64, n & 0xff]);
 
-// ─── Byte helpers ───
-
-function printerSafeText(text: string): string {
-  const normalized = text
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u2013\u2014]/g, '-')
-    .replace(/\u20ac/g, 'EUR');
-
-  let out = '';
-  for (const ch of normalized) {
-    const code = ch.charCodeAt(0);
-    if (code === 0x0a || code === 0x0d) { out += ch; continue; }
-    if (code === 0xa0 || code === 0x202f || code === 0x2009 || code === 0x2007) { out += ' '; continue; }
-    if (code >= 0x20 && code <= 0x7e) { out += ch; continue; }
-    out += '?';
-  }
-  return out;
+function setCodepage(codepageId: number): Uint8Array {
+  return new Uint8Array([ESC, 0x74, codepageId]);
 }
 
-function strBytes(s: string): Uint8Array {
-  const enc = new TextEncoder();
-  return enc.encode(printerSafeText(s));
-}
+const CP858_ID = 19;
 
-function concat(...arrays: Uint8Array[]): Uint8Array {
-  const total = arrays.reduce((sum, a) => sum + a.length, 0);
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const a of arrays) {
-    result.set(a, offset);
-    offset += a.length;
-  }
-  return result;
-}
+const CP858_MAP: Record<number, number> = {
+  0xe0: 0x85, 0xe8: 0x8a, 0xe9: 0x82, 0xea: 0x88, 0xeb: 0x89,
+  0xee: 0x8b, 0xef: 0x8f, 0xf4: 0x94, 0xf6: 0x99, 0xf9: 0x97,
+  0xfb: 0x93, 0xfc: 0x81, 0xe7: 0x87, 0xe1: 0xa0, 0xed: 0xa1,
+  0xf3: 0xa2, 0xf1: 0xa4, 0xd1: 0xa5, 0xe2: 0x83, 0xca: 0x8c,
+  0xcb: 0x8d, 0xcf: 0xc7, 0xd6: 0x98, 0xdf: 0xe1, 0xc0: 0xb7,
+  0xc8: 0xd4, 0xc9: 0x90,
+  0x2019: 0x92, 0x2018: 0x91, 0x201c: 0x93, 0x201d: 0x94,
+  0x2026: 0x85, 0x20ac: 0xd5,
+  0xff: 0xf8, 0xe6: 0x92, 0xc6: 0x91,
+  0xf2: 0xe0,
+};
 
-// ─── WebUSB printer connection ───
-
-export interface ConnectResult {
-  ok: boolean;
-  error?: string;
-}
-
-let connectedDevice: USBDevice | null = null;
-let connectedEndpoint: number = 1;
-let connectedInterface: number = 0;
-
-export function isWebUSBSupported(): boolean {
-  return typeof navigator !== 'undefined' && 'usb' in navigator;
-}
-
-export function isPrinterConnected(): boolean {
-  return connectedDevice !== null;
-}
-
-function classifyError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/not found|no device|cancelled|aborted/i.test(msg)) return 'Aucune imprimante sélectionnée';
-  if (/access|denied|busy|claim/i.test(msg)) return 'L\'imprimante est déjà utilisée par le pilote Windows';
-  if (/configuration|interface/i.test(msg)) return 'Impossible d\'accéder au port d\'impression de l\'imprimante';
-  return msg || 'Erreur inconnue';
-}
-
-export async function requestPrinter(): Promise<ConnectResult> {
-  if (!isWebUSBSupported()) return { ok: false, error: 'WebUSB non supporté par ce navigateur' };
-  try {
-    const device = await navigator.usb.requestDevice({ filters: [] });
-    return await openDevice(device);
-  } catch (err) {
-    return { ok: false, error: classifyError(err) };
-  }
-}
-
-export async function reconnectPrinter(): Promise<boolean> {
-  if (!isWebUSBSupported()) return false;
-  try {
-    const devices = await navigator.usb.getDevices();
-    for (const device of devices) {
-      const r = await openDevice(device);
-      if (r.ok) return true;
-    }
-  } catch {
-    // ignore
-  }
-  return false;
-}
-
-async function openDevice(device: USBDevice): Promise<ConnectResult> {
-  try {
-    if (!device.opened) await device.open();
-
-    // Try every configuration the device exposes
-    const configs = device.configurations.length > 0 ? device.configurations : [null];
-    for (const cfg of configs) {
-      if (cfg && (!device.configuration || device.configuration.configurationValue !== cfg.configurationValue)) {
-        try { await device.selectConfiguration(cfg.configurationValue); } catch { /* keep trying */ }
-      }
-      const activeConfig = device.configuration ?? cfg;
-      const interfaces = activeConfig?.interfaces ?? [];
-      for (const iface of interfaces) {
-        for (const alt of iface.alternates) {
-          const outEp = alt.endpoints?.find(e => e.direction === 'out');
-          if (!outEp) continue;
-          try {
-            await device.claimInterface(iface.interfaceNumber);
-            connectedInterface = iface.interfaceNumber;
-            connectedEndpoint = outEp.endpointNumber;
-            connectedDevice = device;
-            return { ok: true };
-          } catch {
-            // interface may be claimed by another driver — try the next
-          }
-        }
-      }
-    }
-    return { ok: false, error: 'Aucun canal d\'écriture trouvé. Le pilote Windows occupe peut-être l\'imprimante.' };
-  } catch (err) {
-    return { ok: false, error: classifyError(err) };
-  }
-}
-
-export async function disconnectPrinter(): Promise<void> {
-  if (connectedDevice) {
-    try {
-      await connectedDevice.releaseInterface(connectedInterface);
-    } catch { /* ignore */ }
-    try {
-      await connectedDevice.close();
-    } catch { /* ignore */ }
-    connectedDevice = null;
-  }
-}
-
-async function sendBytes(data: Uint8Array): Promise<boolean> {
-  if (!connectedDevice) {
-    const reconnected = await reconnectPrinter();
-    if (!reconnected) return false;
-  }
-  if (!connectedDevice) return false;
-  try {
-    const result = await connectedDevice.transferOut(connectedEndpoint, data);
-    if (result.status !== 'ok') {
-      console.warn('[escpos] transferOut status:', result.status);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.warn('[escpos] transferOut failed:', err);
-    connectedDevice = null;
-    return false;
-  }
-}
-
-// ─── Test ticket ───
-
-export async function openCashDrawer(): Promise<boolean> {
-  // Try connector m=0 (DK-1) with a 100ms pulse, then m=1 (DK-2) as fallback.
-  const DRAWER_KICK_1 = concat(INIT, new Uint8Array([ESC, 0x70, 0x00, 0x32, 0xff]));
-  const DRAWER_KICK_2 = concat(INIT, new Uint8Array([ESC, 0x70, 0x01, 0x32, 0xff]));
-
-  const ok1 = await sendBytes(DRAWER_KICK_1);
-  if (ok1) return true;
-  return sendBytes(DRAWER_KICK_2);
-}
-
-export async function printTestTicket(restaurantName: string): Promise<boolean> {
-  const parts: Uint8Array[] = [
-    INIT,
-    CENTER,
-    BOLD_ON,
-    LARGE_ON,
-    line(restaurantName.toUpperCase() || 'TEST IMPRESSION'),
-    LARGE_OFF,
-    BOLD_OFF,
-    LEFT,
-    dashedLine(),
-    line('Ticket de test'),
-    line(new Date().toLocaleString('fr-FR')),
-    line('Si vous lisez ce texte,'),
-    line('l\'imprimante fonctionne.'),
-    dashedLine(),
-    FEED(5),
-    CUT,
-  ];
-  return sendBytes(concat(...parts));
-}
-
-// ─── Line / text builders ───
-
-function line(text: string): Uint8Array {
-  return strBytes(text + '\n');
-}
-
-function dashedLine(width = RECEIPT_WIDTH): Uint8Array {
-  return strBytes('-'.repeat(width) + '\n');
-}
-
-function solidLine(width = RECEIPT_WIDTH): Uint8Array {
-  return strBytes('='.repeat(width) + '\n');
-}
-
-const RECEIPT_WIDTH = 42;
-const RECEIPT_QTY_WIDTH = 4;
-const RECEIPT_DESCRIPTION_WIDTH = 16;
-const RECEIPT_UNIT_WIDTH = 10;
-const RECEIPT_TOTAL_WIDTH = 12;
-
-function fitText(text: string, width: number): string {
-  return printerSafeText(text).slice(0, width);
-}
-
-function padLine(left: string, right: string, width = RECEIPT_WIDTH): string {
-  const safeLeft = fitText(left, width);
-  const safeRight = fitText(right, width);
-  const space = Math.max(1, width - safeLeft.length - safeRight.length);
-  return safeLeft + ' '.repeat(space) + safeRight + '\n';
-}
-
-function padColumns(qty: string, description: string, unit: string, total: string): string {
-  return `${fitText(qty, RECEIPT_QTY_WIDTH).padEnd(RECEIPT_QTY_WIDTH)}${fitText(description, RECEIPT_DESCRIPTION_WIDTH).padEnd(RECEIPT_DESCRIPTION_WIDTH)}${fitText(unit, RECEIPT_UNIT_WIDTH).padStart(RECEIPT_UNIT_WIDTH)}${fitText(total, RECEIPT_TOTAL_WIDTH).padStart(RECEIPT_TOTAL_WIDTH)}\n`;
-}
-
-function wrapPrinterText(text: string, width: number): string[] {
-  const words = printerSafeText(text).trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [''];
-  const lines: string[] = [];
-  let current = '';
-  for (const word of words) {
-    if (!current) {
-      current = word.slice(0, width);
-    } else if ((current.length + 1 + word.length) <= width) {
-      current += ` ${word}`;
+function encodeText(text: string): Uint8Array {
+  const bytes: number[] = [];
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    if (code < 0x80) {
+      bytes.push(code);
+    } else if (CP858_MAP[code] !== undefined) {
+      bytes.push(CP858_MAP[code]);
     } else {
-      lines.push(current);
-      current = word.slice(0, width);
+      bytes.push(0x3f);
     }
   }
-  if (current) lines.push(current);
-  return lines;
+  return new Uint8Array(bytes);
 }
 
-// ─── Kitchen ticket (compact, no restaurant info) ───
+class ByteBuilder {
+  private chunks: Uint8Array[] = [];
 
-export interface EscposKitchenData {
-  createdAt: string;
-  saleType: string;
-  tableNumber?: string | number | null;
-  customerName?: string | null;
-  orderNotes?: string;
-  items: {
-    quantity: number;
-    product_name: string;
-    variant_label?: string | null;
-    sauces?: { name: string }[] | null;
-    flavors?: { name: string }[] | null;
-    kitchen_note?: string | null;
-    menu_drink?: string | null;
-  }[];
+  append(data: Uint8Array): this {
+    this.chunks.push(data);
+    return this;
+  }
+
+  text(text: string): this {
+    return this.append(encodeText(text));
+  }
+
+  line(text: string = ''): this {
+    return this.text(text + '\n');
+  }
+
+  init(): this { return this.append(INIT); }
+  boldOn(): this { return this.append(BOLD_ON); }
+  boldOff(): this { return this.append(BOLD_OFF); }
+  doubleOn(): this { return this.append(DOUBLE_ON); }
+  doubleOff(): this { return this.append(DOUBLE_OFF); }
+  smallOn(): this { return this.append(SMALL_ON); }
+  smallOff(): this { return this.append(SMALL_OFF); }
+  center(): this { return this.append(CENTER); }
+  left(): this { return this.append(LEFT); }
+  cut(): this { return this.append(CUT); }
+  feed(n: number): this { return this.append(FEED_LINES(n)); }
+  codepage858(): this { return this.append(setCodepage(CP858_ID)); }
+
+  build(): Uint8Array {
+    const total = this.chunks.reduce((s, c) => s + c.length, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const c of this.chunks) {
+      out.set(c, offset);
+      offset += c.length;
+    }
+    return out;
+  }
 }
 
-const saleTypeKitchenLabels: Record<string, string> = {
-  dine_in: 'SUR PLACE',
-  takeaway: 'A EMPORTER',
-  delivery: 'VENTE DIRECTE',
-};
-
-export function buildKitchenTicketBytes(data: EscposKitchenData): Uint8Array {
-  const dateObj = new Date(data.createdAt);
-  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-  const parts: Uint8Array[] = [
-    INIT,
-    CENTER,
-    BOLD_ON,
-    LARGE_ON,
-    line('CUISINE'),
-    LARGE_OFF,
-    BOLD_OFF,
-    LEFT,
-  ];
-
-  // Table or customer
-  if (data.saleType === 'dine_in' && data.tableNumber) {
-    parts.push(BOLD_ON, line(`Sur place n${data.tableNumber}`), BOLD_OFF);
-  } else if (data.customerName) {
-    parts.push(BOLD_ON, line(`${data.customerName}`), BOLD_OFF);
-  }
-
-  parts.push(line(timeStr), dashedLine());
-
-  for (const item of data.items) {
-    const nameLines = wrapPrinterText(item.product_name, 20);
-    parts.push(
-      BOLD_ON,
-      DOUBLE_ON,
-      line(`${item.quantity}x ${nameLines[0]}`),
-      DOUBLE_OFF,
-      BOLD_OFF,
-    );
-    for (const nameLine of nameLines.slice(1)) {
-      parts.push(line(`   ${nameLine}`));
-    }
-    if (item.variant_label) {
-      const v = formatVariantLabel(item.variant_label);
-      if (v) parts.push(strBytes(`  > ${v}\n`));
-    }
-    if (item.sauces && item.sauces.length > 0) {
-      parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => s.name).join(', ')}\n`));
-    }
-    if (item.flavors && item.flavors.length > 0) {
-      parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => f.name).join(', ')}\n`));
-    }
-    if (item.kitchen_note) {
-      parts.push(BOLD_ON, strBytes(`  >> ${item.kitchen_note}\n`), BOLD_OFF);
-    }
-    if (item.menu_drink) {
-      parts.push(strBytes(`  > Boisson: ${item.menu_drink}\n`));
-    }
-  }
-
-  if (data.orderNotes && data.orderNotes.trim()) {
-    parts.push(dashedLine(), BOLD_ON, line('NOTE:'), line(data.orderNotes), BOLD_OFF);
-  }
-
-  parts.push(FEED(5), CUT);
-  return concat(...parts);
-}
-
-// ─── Customer receipt ticket ───
-
-export interface EscposReceiptData {
-  saleNumber: string;
-  createdAt: string;
-  saleType: string;
-  tableNumber?: string | number | null;
-  cashierName?: string | null;
-  customerName?: string | null;
-  items: {
-    quantity: number;
-    product_name: string;
-    unit_price: number;
-    subtotal: number;
-    variant_label?: string | null;
-    sauces?: { name: string; price_supplement?: number }[] | null;
-    flavors?: { name: string }[] | null;
-    menu_drink?: string | null;
-  }[];
-  payments: { method: string; amount: number }[];
-  subtotal: number;
-  taxAmount: number;
-  discountAmount: number;
-  total: number;
-}
-
-export interface EscposReceiptSettings {
-  restaurant_name: string;
-  legal_form?: string;
-  capital?: string;
-  address?: string;
-  phone?: string;
-  vat_number?: string;
-  siret?: string;
-  tax_rate: number;
-  currency_symbol: string;
-  receipt_footer?: string;
-}
-
-const paymentMethodLabels: Record<string, string> = {
-  cash: 'Especes',
-  wave: 'Wave',
-  orange_money: 'Orange Money',
-  card: 'Carte',
-};
-
-const saleTypeReceiptLabels: Record<string, string> = {
-  dine_in: 'Sur place',
-  takeaway: 'Commandes client',
-  delivery: 'Vente directe',
-};
-
-export function buildReceiptBytes(
-  data: EscposReceiptData,
-  settings: EscposReceiptSettings
-): Uint8Array {
-  const sym = printerSafeText(settings.currency_symbol);
-  const fmtNumber = (n: number) => printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
-  const fmt = (n: number) => `${fmtNumber(n)} ${sym}`;
-
-  const dateObj = new Date(data.createdAt);
-  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-  const parts: Uint8Array[] = [INIT, CENTER];
-
-  parts.push(
-    BOLD_ON,
-    LARGE_ON,
-    line(settings.restaurant_name.toUpperCase()),
-    LARGE_OFF,
-    BOLD_OFF,
-  );
-  if (settings.address) parts.push(line(settings.address));
-  if (settings.phone) parts.push(line(`Tel: ${settings.phone}`));
-  if (settings.vat_number) parts.push(line(`TVA: ${settings.vat_number}`));
-  if (settings.siret) parts.push(line(`SIRET: ${settings.siret}`));
-  parts.push(LEFT, solidLine(RECEIPT_WIDTH));
-
-  parts.push(strBytes(padLine(`Ticket N: ${data.saleNumber}`, '')));
-  parts.push(strBytes(padLine(`Date: ${dateStr}`, `Heure: ${timeStr}`)));
-  if (data.tableNumber) {
-    parts.push(strBytes(padLine(`Table: ${data.tableNumber}`, `Serveur: ${data.cashierName ?? 'N/A'}`)));
-  } else {
-    parts.push(strBytes(padLine('Serveur:', data.cashierName ?? 'N/A')));
-  }
-  if (data.customerName) parts.push(strBytes(padLine('Client:', data.customerName)));
-  if (data.saleType !== 'dine_in') {
-    parts.push(strBytes(padLine('Mode:', saleTypeReceiptLabels[data.saleType] ?? data.saleType)));
-  }
-  parts.push(dashedLine());
-  parts.push(strBytes(padColumns('Qte', 'Designation', 'P.U.', 'Total')));
-  parts.push(dashedLine());
-
-  for (const item of data.items) {
-    const nameLines = wrapPrinterText(item.product_name, RECEIPT_DESCRIPTION_WIDTH);
-    parts.push(strBytes(padColumns(`${item.quantity}x`, nameLines[0], fmtNumber(item.unit_price), fmtNumber(item.subtotal))));
-    for (const nameLine of nameLines.slice(1)) {
-      parts.push(strBytes(padColumns('', nameLine, '', '')));
-    }
-    if (item.variant_label) {
-      parts.push(strBytes(`  > ${printerSafeText(item.variant_label)}\n`));
-    }
-    if (item.sauces && item.sauces.length > 0) {
-      parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => printerSafeText(s.name)).join(', ')}\n`));
-    }
-    if (item.flavors && item.flavors.length > 0) {
-      parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => printerSafeText(f.name)).join(', ')}\n`));
-    }
-    if (item.menu_drink) {
-      parts.push(strBytes(`  > Boisson: ${printerSafeText(item.menu_drink)}\n`));
-    }
-  }
-
-  parts.push(dashedLine());
-  if (data.discountAmount > 0) {
-    parts.push(strBytes(padLine('Sous-total', fmt(data.subtotal))));
-    parts.push(strBytes(padLine('Remise', `- ${fmt(data.discountAmount)}`)));
-  }
-  parts.push(strBytes(padLine(`TVA (${settings.tax_rate}%)`, fmt(data.taxAmount))));
-  parts.push(solidLine(RECEIPT_WIDTH));
-  parts.push(BOLD_ON, strBytes(padLine('TOTAL TTC', fmt(data.total))), BOLD_OFF);
-  parts.push(solidLine(RECEIPT_WIDTH));
-
-  parts.push(BOLD_ON, line('MODE DE REGLEMENT'), BOLD_OFF);
-  for (const p of data.payments) {
-    parts.push(strBytes(padLine(`${paymentMethodLabels[p.method] ?? p.method}:`, fmt(p.amount))));
-  }
-  parts.push(dashedLine());
-
-  parts.push(CENTER, line(settings.receipt_footer || 'Merci de votre visite!'), line('A bientot.'), LEFT);
-  parts.push(FEED(5), CUT);
-  return concat(...parts);
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, Math.max(1, max - 1)) + '.' : s;
 }
 
 function fmtNum(n: number): string {
-  return printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
-// ─── Combined: kitchen + receipt with cut between ───
-
-export function buildCombinedBytes(
-  kitchen: EscposKitchenData,
-  receipt: EscposReceiptData,
-  settings: EscposReceiptSettings
-): Uint8Array {
-  const kitchenBytes = buildKitchenTicketBytes(kitchen);
-  const receiptBytes = buildReceiptBytes(receipt, settings);
-  return concat(kitchenBytes, receiptBytes);
+function padLine(left: string, right: string, cols: number): string {
+  const space = cols - left.length - right.length;
+  if (space < 1) return left + '\n' + ' '.repeat(Math.max(0, cols - right.length)) + right;
+  return left + ' '.repeat(space) + right;
 }
 
-// ─── Public print API ───
-
-export async function printBytes(data: Uint8Array): Promise<boolean> {
-  return sendBytes(data);
+export interface EscPosItem {
+  nom: string;
+  qty: number;
+  notes?: string;
+  options?: string[];
+  unitPrice: number;
 }
 
-export async function printKitchenTicket(data: EscposKitchenData): Promise<boolean> {
-  const bytes = buildKitchenTicketBytes(data);
-  return sendBytes(bytes);
+export interface EscPosTicketParams {
+  restaurantName: string;
+  address?: string | null;
+  phone?: string | null;
+  type: string;
+  tableNom: string;
+  ticketNumber: string;
+  items: EscPosItem[];
+  total?: number;
+  montantRecu?: number;
+  monnaie?: number;
+  paymentMethodLabel?: string;
+  width: PaperWidth;
+  isOrderTicket?: boolean;
 }
 
-export async function printReceipt(
-  data: EscposReceiptData,
-  settings: EscposReceiptSettings
-): Promise<boolean> {
-  const bytes = buildReceiptBytes(data, settings);
-  return sendBytes(bytes);
-}
+export function buildEscPosTicket(params: EscPosTicketParams): Uint8Array {
+  const layout = layoutForWidth(params.width);
+  const cols = layout.columns;
+  const b = new ByteBuilder();
+  const now = new Date().toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+    timeZone: 'Africa/Dakar',
+  });
 
-export async function printCombined(
-  kitchen: EscposKitchenData,
-  receipt: EscposReceiptData,
-  settings: EscposReceiptSettings
-): Promise<boolean> {
-  const kitchenBytes = buildKitchenTicketBytes(kitchen);
-  const receiptBytes = buildReceiptBytes(receipt, settings);
-  const ok1 = await sendBytes(kitchenBytes);
-  if (!ok1) return false;
-  // Give the printer time to execute the cut before the next job starts.
-  await new Promise(r => setTimeout(r, 700));
-  return sendBytes(receiptBytes);
-}
+  b.init().codepage858();
 
-// ─── X Report (cash session closure) ───
+  const isOrderTicket = params.isOrderTicket || params.type === 'INITIAL';
+  const showPrices = params.type === 'BILL' || params.type === 'RECEIPT';
+  const typeLabel = params.type === 'INITIAL' ? 'BON DE COMMANDE'
+    : params.type === 'ADDONS' ? 'AJOUTS'
+    : params.type === 'BILL' ? 'ADDITION'
+    : params.type === 'RECEIPT' ? 'FACTURE'
+    : params.type === 'TEST' ? 'TEST IMPRESSION'
+    : params.type === 'REPORT_X' ? 'RAPPORT X'
+    : params.type === 'REPORT_Z' ? 'CLOTURE Z'
+    : params.type;
 
-export interface EscposXReportData {
-  sessionNumber: number;
-  openedAt: string;
-  closedAt: string;
-  cashierName: string;
-  salesCount: number;
-  totalSales: number;
-  byMethod: {
-    cash: number;
-    wave: number;
-    orange_money: number;
-    card: number;
-  };
-  byCategory: { name: string; count: number; total: number }[];
-  byUser: { name: string; products: { name: string; qty: number }[] }[];
-  openingBalance: number;
-  expectedCash: number;
-  actualCash: number;
-  cashDifference: number;
-  notes?: string | null;
-}
+  const doubleCols = Math.floor(cols / 2);
+  const line = '-'.repeat(cols);
+  const dline = '='.repeat(cols);
 
-export interface EscposXReportSettings {
-  restaurant_name: string;
-  address: string;
-  phone: string;
-  vat_number?: string;
-  siret?: string;
-  currency_symbol: string;
-}
-
-export function buildXReportBytes(
-  data: EscposXReportData,
-  settings: EscposXReportSettings
-): Uint8Array {
-  const sym = printerSafeText(settings.currency_symbol);
-  const fmtNumber = (n: number) =>
-    printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
-  const fmtSigned = (n: number) => `${n >= 0 ? '+' : '-'}${fmtNumber(Math.abs(n))} ${sym}`;
-  const fmt = (n: number) => `${fmtNumber(n)} ${sym}`;
-
-  const openedAt = new Date(data.openedAt);
-  const closedAt = new Date(data.closedAt);
-  const fmtTime = (d: Date) =>
-    d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const fmtDate = (d: Date) =>
-    d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-  const parts: Uint8Array[] = [INIT, CENTER];
-
-  parts.push(
-    BOLD_ON,
-    LARGE_ON,
-    line(settings.restaurant_name.toUpperCase()),
-    LARGE_OFF,
-    BOLD_OFF,
-  );
-  if (settings.address) parts.push(line(settings.address));
-  if (settings.phone) parts.push(line(`Tel: ${settings.phone}`));
-  if (settings.vat_number) parts.push(line(`TVA: ${settings.vat_number}`));
-  if (settings.siret) parts.push(line(`SIRET: ${settings.siret}`));
-
-  parts.push(solidLine(RECEIPT_WIDTH));
-  parts.push(BOLD_ON, DOUBLE_ON, line('X DE CAISSE'), DOUBLE_OFF, BOLD_OFF);
-  parts.push(line(`Session N ${String(data.sessionNumber).padStart(4, '0')}`));
-  parts.push(solidLine(RECEIPT_WIDTH));
-
-  parts.push(LEFT);
-  parts.push(strBytes(padLine('Date', fmtDate(closedAt))));
-  parts.push(strBytes(padLine('Ouverture', `${fmtDate(openedAt)} ${fmtTime(openedAt)}`)));
-  parts.push(strBytes(padLine('Fermeture', `${fmtDate(closedAt)} ${fmtTime(closedAt)}`)));
-  parts.push(strBytes(padLine('Caissier', data.cashierName)));
-  parts.push(dashedLine());
-
-  parts.push(BOLD_ON, line('ACTIVITE'), BOLD_OFF);
-  parts.push(strBytes(padLine('Nb de ventes', String(data.salesCount))));
-  parts.push(BOLD_ON, strBytes(padLine('CA Total', fmt(data.totalSales))), BOLD_OFF);
-  parts.push(dashedLine());
-
-  parts.push(BOLD_ON, line('ENCAISSEMENTS'), BOLD_OFF);
-  parts.push(strBytes(padLine('Especes', fmt(data.byMethod.cash))));
-  parts.push(strBytes(padLine('Wave', fmt(data.byMethod.wave))));
-  parts.push(strBytes(padLine('Orange Money', fmt(data.byMethod.orange_money))));
-  parts.push(strBytes(padLine('Carte', fmt(data.byMethod.card))));
-  const totalEncaisse =
-    data.byMethod.cash + data.byMethod.wave + data.byMethod.orange_money + data.byMethod.card;
-  parts.push(dashedLine());
-  parts.push(BOLD_ON, strBytes(padLine('Total encaisse', fmt(totalEncaisse))), BOLD_OFF);
-  parts.push(dashedLine());
-
-  if (data.byCategory.length > 0) {
-    parts.push(BOLD_ON, line('VENTES PAR CATEGORIE'), BOLD_OFF);
-    for (const cat of data.byCategory) {
-      parts.push(strBytes(padLine(`${cat.name} (${cat.count})`, fmt(cat.total))));
+  if (isOrderTicket) {
+    const dest = params.type === 'INITIAL' ? '' : '';
+    b.center().doubleOn().boldOn().line(typeLabel + dest).boldOff().doubleOff().left();
+    b.line(dline);
+    b.boldOn().text(`Table: ${params.tableNom}`).boldOff().line(` · Ticket ${params.ticketNumber} · ${now}`);
+    b.line(line);
+  } else {
+    b.center();
+    b.doubleOn().line(params.restaurantName).doubleOff();
+    if (showPrices) {
+      if (params.address) b.line(params.address);
+      if (params.phone) b.line('Tel: ' + params.phone);
+      b.line(dline);
+      b.boldOn().line(typeLabel).boldOff();
+    } else {
+      b.boldOn().line(typeLabel).boldOff();
+      b.line(dline);
     }
-    parts.push(dashedLine());
+    b.left();
+    if (showPrices || params.type === 'TEST' || params.type === 'ADDONS') {
+      b.line(`Table ${params.tableNom} · Ticket ${params.ticketNumber} · ${now}`);
+      b.line(line);
+    }
   }
 
-  if (data.byUser.length > 0) {
-    parts.push(BOLD_ON, line('DETAIL DES PRODUITS PAR UTILISATEUR'), BOLD_OFF);
-    for (const user of data.byUser) {
-      parts.push(BOLD_ON, line(user.name), BOLD_OFF);
-      for (const product of user.products) {
-        const productLines = wrapPrinterText(product.name, RECEIPT_WIDTH - 6);
-        parts.push(strBytes(padLine(productLines[0], String(product.qty))));
-        for (const productLine of productLines.slice(1)) {
-          parts.push(line(`  ${productLine}`));
-        }
+  const merged = mergeItems(params.items);
+  for (const item of merged) {
+    const prefix = `${item.qty}x `;
+    const lineTotal = fmtNum(item.unitPrice * item.qty) + 'F';
+
+    if (isOrderTicket && !showPrices) {
+      const dMaxNom = doubleCols - prefix.length;
+      b.doubleOn().boldOn().text(prefix).line(truncate(item.nom, Math.max(6, dMaxNom))).boldOff().doubleOff();
+    } else {
+      if (showPrices) {
+        const maxNom = cols - prefix.length - lineTotal.length - 1;
+        const label = prefix + truncate(item.nom, Math.max(8, maxNom));
+        const padding = Math.max(1, cols - label.length - lineTotal.length);
+        b.boldOn().text(label).text(' '.repeat(padding)).line(lineTotal).boldOff();
+      } else {
+        b.boldOn().text(prefix).line(truncate(item.nom, Math.max(8, cols - prefix.length))).boldOff();
       }
     }
-    parts.push(dashedLine());
-  }
 
-  parts.push(BOLD_ON, line('COMPTAGE CAISSE'), BOLD_OFF);
-  parts.push(strBytes(padLine('Fonds initial', fmt(data.openingBalance))));
-  parts.push(strBytes(padLine('Especes attendues', fmt(data.expectedCash))));
-  parts.push(strBytes(padLine('Especes comptees', fmt(data.actualCash))));
-  parts.push(solidLine(RECEIPT_WIDTH));
-
-  const diff = data.cashDifference;
-  const diffLabel =
-    diff === 0 ? 'CAISSE EQUILIBREE' : diff > 0 ? 'EXCEDENT' : 'MANQUE';
-  parts.push(BOLD_ON, strBytes(padLine(diffLabel, fmtSigned(diff))), BOLD_OFF);
-  parts.push(solidLine(RECEIPT_WIDTH));
-
-  if (data.notes && data.notes.trim().length > 0) {
-    parts.push(BOLD_ON, line('NOTES'), BOLD_OFF);
-    const wrapped = wrapPrinterText(data.notes, RECEIPT_WIDTH);
-    for (const l of wrapped) parts.push(line(l));
-    parts.push(dashedLine());
-  }
-
-  parts.push(CENTER);
-  parts.push(line(`Imprime le ${new Date().toLocaleString('fr-FR')}`));
-  parts.push(line('Document a conserver'));
-  parts.push(LEFT);
-  parts.push(FEED(5), CUT);
-
-  return concat(...parts);
-}
-
-export async function printXReport(
-  data: EscposXReportData,
-  settings: EscposXReportSettings
-): Promise<boolean> {
-  const bytes = buildXReportBytes(data, settings);
-  return sendBytes(bytes);
-}
-
-// ─── Cancelled receipt ticket ───
-
-export interface EscposCancelledReceiptData extends EscposReceiptData {
-  cancelledByName?: string | null;
-  cancelledAt?: string | null;
-  cancelReason?: string | null;
-}
-
-export function buildCancelledReceiptBytes(
-  data: EscposCancelledReceiptData,
-  settings: EscposReceiptSettings
-): Uint8Array {
-  const receiptBytes = buildReceiptBytes(data, settings);
-  const bannerParts: Uint8Array[] = [
-    INIT,
-    CENTER,
-    BOLD_ON,
-    DOUBLE_ON,
-    line('*** ANNULE ***'),
-    DOUBLE_OFF,
-    BOLD_OFF,
-    LEFT,
-  ];
-  if (data.cancelReason) {
-    bannerParts.push(BOLD_ON, line(`Motif: ${data.cancelReason}`), BOLD_OFF);
-  }
-  if (data.cancelledByName) {
-    bannerParts.push(line(`Annule par: ${data.cancelledByName}`));
-  }
-  if (data.cancelledAt) {
-    const cancelTime = new Date(data.cancelledAt).toLocaleString('fr-FR');
-    bannerParts.push(line(`Le: ${cancelTime}`));
-  }
-  bannerParts.push(dashedLine());
-  return concat(...bannerParts, receiptBytes);
-}
-
-export async function printCancelledReceipt(
-  data: EscposCancelledReceiptData,
-  settings: EscposReceiptSettings
-): Promise<boolean> {
-  const bytes = buildCancelledReceiptBytes(data, settings);
-  return sendBytes(bytes);
-}
-
-// ─── Delivery ticket ───
-
-export interface EscposDeliveryData {
-  deliveryNumber: number;
-  createdAt: string;
-  customerName: string;
-  customerPhone?: string | null;
-  deliveryAddress: string;
-  deliveryFee: number;
-  notes?: string | null;
-  driverName?: string | null;
-  status: string;
-}
-
-export interface EscposDeliverySettings {
-  restaurant_name: string;
-  address?: string;
-  phone?: string;
-  currency_symbol: string;
-}
-
-export function buildDeliveryTicketBytes(
-  data: EscposDeliveryData,
-  settings: EscposDeliverySettings
-): Uint8Array {
-  const sym = printerSafeText(settings.currency_symbol);
-  const fmtNumber = (n: number) => printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
-  const fmt = (n: number) => `${fmtNumber(n)} ${sym}`;
-
-  const dateObj = new Date(data.createdAt);
-  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-  const statusLabels: Record<string, string> = {
-    pending: 'EN ATTENTE DE PAIEMENT',
-    assigned: 'ASSIGNEE',
-    picked_up: 'EN ROUTE',
-    delivered: 'LIVREE',
-    cancelled: 'ANNULEE',
-  };
-
-  const parts: Uint8Array[] = [INIT, CENTER];
-
-  parts.push(
-    BOLD_ON,
-    LARGE_ON,
-    line(settings.restaurant_name.toUpperCase()),
-    LARGE_OFF,
-    BOLD_OFF,
-  );
-  if (settings.address) parts.push(line(settings.address));
-  if (settings.phone) parts.push(line(`Tel: ${settings.phone}`));
-  parts.push(LEFT, solidLine(RECEIPT_WIDTH));
-
-  parts.push(BOLD_ON, DOUBLE_ON, line('BON DE LIVRAISON'), DOUBLE_OFF, BOLD_OFF);
-  parts.push(line(`N: ${data.deliveryNumber}`));
-  parts.push(line(`${dateStr} ${timeStr}`));
-  parts.push(dashedLine());
-
-  parts.push(BOLD_ON, line('CLIENT'), BOLD_OFF);
-  parts.push(line(data.customerName));
-  if (data.customerPhone) parts.push(line(`Tel: ${data.customerPhone}`));
-  parts.push(dashedLine());
-
-  parts.push(BOLD_ON, line('ADRESSE'), BOLD_OFF);
-  const addrLines = wrapPrinterText(data.deliveryAddress, RECEIPT_WIDTH);
-  for (const l of addrLines) parts.push(line(l));
-  parts.push(dashedLine());
-
-  if (data.driverName) {
-    parts.push(strBytes(padLine('Livreur:', data.driverName)));
-  }
-
-  parts.push(strBytes(padLine('Statut:', statusLabels[data.status] ?? data.status)));
-  parts.push(dashedLine());
-
-  parts.push(BOLD_ON, strBytes(padLine('Frais de livraison:', fmt(data.deliveryFee))), BOLD_OFF);
-  parts.push(solidLine(RECEIPT_WIDTH));
-
-  if (data.notes && data.notes.trim()) {
-    parts.push(BOLD_ON, line('NOTES'), BOLD_OFF);
-    const noteLines = wrapPrinterText(data.notes, RECEIPT_WIDTH);
-    for (const l of noteLines) parts.push(line(l));
-    parts.push(dashedLine());
-  }
-
-  parts.push(CENTER, line('--- Bon de livraison ---'), LEFT);
-  parts.push(FEED(5), CUT);
-  return concat(...parts);
-}
-
-export async function printDeliveryTicket(
-  data: EscposDeliveryData,
-  settings: EscposDeliverySettings
-): Promise<boolean> {
-  const bytes = buildDeliveryTicketBytes(data, settings);
-  return sendBytes(bytes);
-}
-
-// ─── Kitchen ticket items ───
-// All items (including drinks) are sent to the kitchen ticket — the kitchen prepares everything.
-
-export function filterKitchenCartItems<T extends { product: { category_id: string | null } }>(
-  items: T[],
-  _categories: { id: string; name: string }[]
-): T[] {
-  return items;
-}
-
-// ─── Deferred receipt (pending payment) ───
-
-export interface EscposDeferredReceiptData {
-  saleNumber: string;
-  createdAt: string;
-  saleType: string;
-  tableNumber?: string | number | null;
-  cashierName?: string | null;
-  customerName?: string | null;
-  customerPhone?: string | null;
-  customerAddress?: string | null;
-  items: {
-    quantity: number;
-    product_name: string;
-    unit_price: number;
-    subtotal: number;
-    variant_label?: string | null;
-    sauces?: { name: string; price_supplement?: number }[] | null;
-    flavors?: { name: string }[] | null;
-    menu_drink?: string | null;
-  }[];
-  subtotal: number;
-  taxAmount: number;
-  discountAmount: number;
-  total: number;
-}
-
-export function buildDeferredReceiptBytes(
-  data: EscposDeferredReceiptData,
-  settings: EscposReceiptSettings
-): Uint8Array {
-  const sym = printerSafeText(settings.currency_symbol);
-  const fmtNumber = (n: number) => printerSafeText(n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }));
-  const fmt = (n: number) => `${fmtNumber(n)} ${sym}`;
-
-  const dateObj = new Date(data.createdAt);
-  const dateStr = dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-  const parts: Uint8Array[] = [INIT, CENTER];
-
-  parts.push(
-    BOLD_ON,
-    LARGE_ON,
-    line(settings.restaurant_name.toUpperCase()),
-    LARGE_OFF,
-    BOLD_OFF,
-  );
-  if (settings.address) parts.push(line(settings.address));
-  if (settings.phone) parts.push(line(`Tel: ${settings.phone}`));
-
-  parts.push(LEFT, solidLine(RECEIPT_WIDTH));
-  parts.push(BOLD_ON, DOUBLE_ON, line('EN ATTENTE DE PAIEMENT'), DOUBLE_OFF, BOLD_OFF);
-  parts.push(solidLine(RECEIPT_WIDTH));
-
-  parts.push(strBytes(padLine(`Ticket N: ${data.saleNumber}`, '')));
-  parts.push(strBytes(padLine(`Date: ${dateStr}`, `Heure: ${timeStr}`)));
-  if (data.tableNumber) {
-    parts.push(strBytes(padLine(`Table: ${data.tableNumber}`, `Serveur: ${data.cashierName ?? 'N/A'}`)));
-  } else {
-    parts.push(strBytes(padLine('Serveur:', data.cashierName ?? 'N/A')));
-  }
-  if (data.customerName) parts.push(strBytes(padLine('Client:', data.customerName)));
-  if (data.customerPhone) parts.push(strBytes(padLine('Tel:', data.customerPhone)));
-  if (data.saleType !== 'dine_in') {
-    parts.push(strBytes(padLine('Mode:', saleTypeReceiptLabels[data.saleType] ?? data.saleType)));
-  }
-
-  if (data.customerAddress) {
-    parts.push(dashedLine());
-    parts.push(BOLD_ON, line('ADRESSE DE LIVRAISON'), BOLD_OFF);
-    const addrLines = wrapPrinterText(data.customerAddress, RECEIPT_WIDTH);
-    for (const l of addrLines) parts.push(line(l));
-  }
-
-  parts.push(dashedLine());
-  parts.push(strBytes(padColumns('Qte', 'Designation', 'P.U.', 'Total')));
-  parts.push(dashedLine());
-
-  for (const item of data.items) {
-    const nameLines = wrapPrinterText(item.product_name, RECEIPT_DESCRIPTION_WIDTH);
-    parts.push(strBytes(padColumns(`${item.quantity}x`, nameLines[0], fmtNumber(item.unit_price), fmtNumber(item.subtotal))));
-    for (const nameLine of nameLines.slice(1)) {
-      parts.push(strBytes(padColumns('', nameLine, '', '')));
+    if (item.options && item.options.length > 0) {
+      b.text('  > ').line(item.options.join(', '));
     }
-    if (item.variant_label) {
-      parts.push(strBytes(`  > ${printerSafeText(item.variant_label)}\n`));
-    }
-    if (item.sauces && item.sauces.length > 0) {
-      parts.push(strBytes(`  > Sauces: ${item.sauces.map(s => printerSafeText(s.name)).join(', ')}\n`));
-    }
-    if (item.flavors && item.flavors.length > 0) {
-      parts.push(strBytes(`  > Gouts: ${item.flavors.map(f => printerSafeText(f.name)).join(', ')}\n`));
-    }
-    if (item.menu_drink) {
-      parts.push(strBytes(`  > Boisson: ${printerSafeText(item.menu_drink)}\n`));
+    if (item.notes) {
+      b.smallOn().text('  ! ').line(item.notes).smallOff();
     }
   }
 
-  parts.push(dashedLine());
-  if (data.discountAmount > 0) {
-    parts.push(strBytes(padLine('Sous-total', fmt(data.subtotal))));
-    parts.push(strBytes(padLine('Remise', `- ${fmt(data.discountAmount)}`)));
+  if (!isOrderTicket) b.line(line);
+
+  if (showPrices) {
+    const itemsTotal = merged.reduce((s, i) => s + i.unitPrice * i.qty, 0);
+    const computedTotal = (params.total && params.total > 0) ? params.total : itemsTotal;
+    const totalStr = fmtNum(computedTotal) + ' FCFA';
+    b.line(dline);
+    b.center().doubleOn().boldOn();
+    b.line(padLine('TOTAL:', totalStr, doubleCols));
+    b.boldOff().doubleOff().left();
+
+    if (params.type === 'RECEIPT' && params.paymentMethodLabel) {
+      b.line(padLine('PAIEMENT:', params.paymentMethodLabel, cols));
+    }
+    if (params.type === 'RECEIPT' && params.montantRecu !== undefined && params.montantRecu > 0) {
+      b.line(padLine('RECU:', fmtNum(params.montantRecu) + ' FCFA', cols));
+    }
+    if (params.type === 'RECEIPT' && params.monnaie !== undefined && params.monnaie > 0) {
+      b.boldOn().line(padLine('MONNAIE:', fmtNum(params.monnaie) + ' FCFA', cols)).boldOff();
+    }
+    b.line(line);
   }
-  parts.push(strBytes(padLine(`TVA (${settings.tax_rate}%)`, fmt(data.taxAmount))));
-  parts.push(solidLine(RECEIPT_WIDTH));
-  parts.push(BOLD_ON, strBytes(padLine('TOTAL TTC', fmt(data.total))), BOLD_OFF);
-  parts.push(solidLine(RECEIPT_WIDTH));
 
-  parts.push(CENTER, BOLD_ON, line('A REGLER ULTERIEUREMENT'), BOLD_OFF);
-  parts.push(dashedLine());
+  if (!isOrderTicket) {
+    b.center().line('Merci de votre confiance').left();
+  }
 
-  parts.push(CENTER, line(settings.receipt_footer || 'Merci de votre visite!'), line('A bientot.'), LEFT);
-  parts.push(FEED(5), CUT);
-  return concat(...parts);
+  b.feed(3);
+  b.cut();
+  return b.build();
 }
 
-export async function printDeferredReceipt(
-  data: EscposDeferredReceiptData,
-  settings: EscposReceiptSettings
-): Promise<boolean> {
-  const bytes = buildDeferredReceiptBytes(data, settings);
-  return sendBytes(bytes);
+function mergeItems(items: EscPosItem[]): EscPosItem[] {
+  const map = new Map<string, EscPosItem>();
+  for (const item of items) {
+    const key = `${item.nom}|${item.unitPrice}|${(item.options || []).join(',')}|${item.notes || ''}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.qty += item.qty;
+    } else {
+      map.set(key, { ...item });
+    }
+  }
+  return Array.from(map.values());
+}
+
+export function buildEscPosTestTicket(printerName: string, width: PaperWidth): Uint8Array {
+  const layout = layoutForWidth(width);
+  const cols = layout.columns;
+  const b = new ByteBuilder();
+  b.init().codepage858();
+  b.center().doubleOn().boldOn().line('TEST IMPRESSION').boldOff().doubleOff().left();
+  b.line('='.repeat(cols));
+  b.line(`Imprimante: ${printerName}`);
+  b.line(`Largeur: ${width}mm (${cols} colonnes)`);
+  b.line(`Date: ${new Date().toLocaleString('fr-FR', { timeZone: 'Africa/Dakar' })}`);
+  b.line('-'.repeat(cols));
+  b.boldOn().line('Accents: é è à ù ç ê î ô û').boldOff();
+  b.line('Français: café résumé hôtel');
+  b.line('Symbole: € ° µ §');
+  b.line('-'.repeat(cols));
+  b.center().line('Impression OK').left();
+  b.feed(3);
+  b.cut();
+  return b.build();
 }
