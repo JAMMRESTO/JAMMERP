@@ -25,6 +25,12 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
   const siteId = currentSite?.id ?? null;
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [components, setComponents] = useState<ProductComponent[]>([]);
+  const [compositions, setCompositions] = useState<ProductComposition[]>([]);
+  const [newCompComponentId, setNewCompComponentId] = useState('');
+  const [newCompQty, setNewCompQty] = useState(1);
+  const [newCompIsDrink, setNewCompIsDrink] = useState(false);
+  const [newCompDrinkChoice, setNewCompDrinkChoice] = useState<DrinkChoice>('fixed');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState(() => {
@@ -44,6 +50,7 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
       is_available: product?.is_available ?? true,
       unit: product?.unit ?? 'pièce',
       low_stock_threshold: product?.low_stock_threshold ?? 5,
+      stock_deduction_quantity: product?.stock_deduction_quantity ?? 1,
       variants: (product?.variants as ProductVariant[]) ?? [],
     };
   });
@@ -57,6 +64,19 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
     : 0;
 
   const profit = form.price - form.cost_price;
+
+  useEffect(() => {
+    if (!siteId) return;
+    supabase.from('product_components').select('*').eq('site_id', siteId).eq('is_active', true).order('name')
+      .then(({ data }) => { if (data) setComponents(data as ProductComponent[]); });
+  }, [siteId]);
+
+  useEffect(() => {
+    if (!product?.id || !siteId) return;
+    supabase.from('product_compositions').select('*, component:product_components(id, name, unit, stock, is_active)')
+      .eq('product_id', product.id).eq('site_id', siteId)
+      .then(({ data }) => { if (data) setCompositions(data as ProductComposition[]); });
+  }, [product?.id, siteId]);
 
   useEffect(() => {
     // Auto-generate product code if empty
@@ -99,6 +119,36 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
     }));
   }
 
+  function addComposition() {
+    if (!newCompComponentId || newCompQty <= 0) return;
+    const comp = components.find(c => c.id === newCompComponentId);
+    if (!comp) return;
+    if (compositions.some(c => c.component_id === newCompComponentId && c.is_drink === newCompIsDrink)) return;
+    setCompositions(prev => [...prev, {
+      id: '',
+      site_id: siteId,
+      product_id: product?.id ?? '',
+      component_id: newCompComponentId,
+      quantity_per_unit: newCompQty,
+      is_drink: newCompIsDrink,
+      drink_choice: newCompDrinkChoice,
+      component: { id: comp.id, name: comp.name, unit: comp.unit, stock: comp.stock, is_active: comp.is_active },
+      created_at: '',
+    }]);
+    setNewCompComponentId('');
+    setNewCompQty(1);
+    setNewCompIsDrink(false);
+    setNewCompDrinkChoice('fixed');
+  }
+
+  function removeComposition(index: number) {
+    setCompositions(prev => prev.filter((_, i) => i !== index));
+  }
+
+  function updateComposition(index: number, field: 'quantity_per_unit' | 'drink_choice', value: number | DrinkChoice) {
+    setCompositions(prev => prev.map((c, i) => i === index ? { ...c, [field]: value } : c));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
@@ -109,19 +159,39 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
       stock: form.track_stock ? form.stock : null,
     };
 
+    let productId = product?.id;
     let error;
     if (product) {
       ({ error } = await supabase.from('products').update(payload).eq('id', product.id).eq('site_id', siteId));
     } else {
-      const payloadWithSite = { ...payload, site_id: siteId };
-      ({ error } = await supabase.from('products').insert(payloadWithSite));
+      const { data: insertData, error: insertError } = await supabase.from('products').insert({ ...payload, site_id: siteId }).select('id').single();
+      error = insertError;
+      productId = insertData?.id;
     }
 
-    setSaving(false);
     if (error) {
+      setSaving(false);
       toast('error', 'Erreur lors de l\'enregistrement');
       return;
     }
+
+    if (productId && siteId && settings.component_stock_enabled) {
+      await supabase.from('product_compositions').delete().eq('product_id', productId).eq('site_id', siteId);
+      if (compositions.length > 0) {
+        await supabase.from('product_compositions').insert(
+          compositions.map(c => ({
+            site_id: siteId,
+            product_id: productId,
+            component_id: c.component_id,
+            quantity_per_unit: c.quantity_per_unit,
+            is_drink: c.is_drink,
+            drink_choice: c.drink_choice,
+          }))
+        );
+      }
+    }
+
+    setSaving(false);
     toast('success', product ? 'Produit mis à jour' : 'Produit créé');
     onSave();
   }
@@ -499,6 +569,23 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                 </div>
               )}
 
+              {form.track_stock && settings.stock_portion_enabled && (
+                <div className="p-3 rounded-xl bg-blue-500/8 border border-blue-500/20 space-y-2">
+                  <label className="text-white/60 text-sm font-medium block">Quantité de stock déduite par unité vendue</label>
+                  <input
+                    type="number"
+                    value={form.stock_deduction_quantity || ''}
+                    onChange={e => f('stock_deduction_quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                    onFocus={e => e.target.select()}
+                    placeholder="1"
+                    min={1}
+                    step={1}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-all"
+                  />
+                  <p className="text-white/30 text-xs">Exemple : une portion de 4 tenders déduit 4 pièces du stock.</p>
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <span className="text-white/50 text-sm">Disponible à la vente</span>
                 <button
@@ -513,11 +600,87 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                   />
                 </button>
               </div>
+
+              {settings.component_stock_enabled && (
+                <div className="border-t border-white/8 pt-4 space-y-3">
+                  <h4 className="text-white/60 text-xs font-semibold uppercase tracking-wider">Composition / Stock par composants</h4>
+                  {compositions.length > 0 && (
+                    <div className="space-y-1.5">
+                      {compositions.map((c, i) => (
+                        <div key={i} className="flex items-center gap-2 bg-blue-500/5 border border-blue-500/15 rounded-xl px-3 py-2">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-blue-200 truncate block">{c.component?.name ?? 'Composant'}</span>
+                            {c.is_drink && (
+                              <span className="text-[10px] text-amber-400/70 bg-amber-500/10 px-1.5 py-0.5 rounded mt-0.5 inline-block">
+                                Boisson {c.drink_choice === 'fixed' ? 'fixe' : 'au choix'}
+                              </span>
+                            )}
+                          </div>
+                          <input
+                            type="number" min={0} step={1} value={c.quantity_per_unit || ''}
+                            onChange={e => updateComposition(i, 'quantity_per_unit', parseFloat(e.target.value) || 0)}
+                            className="w-16 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs text-right focus:outline-none focus:border-blue-500/50"
+                          />
+                          {c.is_drink && (
+                            <select
+                              value={c.drink_choice} onChange={e => updateComposition(i, 'drink_choice', e.target.value as DrinkChoice)}
+                              className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs focus:outline-none"
+                            >
+                              <option value="fixed" className="bg-gray-900">Fixe</option>
+                              <option value="choice" className="bg-gray-900">Au choix</option>
+                            </select>
+                          )}
+                          <button type="button" onClick={() => removeComposition(i)} className="w-7 h-7 flex items-center justify-center text-blue-400/50 hover:text-red-400 transition-colors flex-shrink-0">
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={newCompComponentId} onChange={e => setNewCompComponentId(e.target.value)}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-blue-500/50"
+                    >
+                      <option value="" className="bg-gray-900">Composant...</option>
+                      {components.filter(c => !compositions.some(co => co.component_id === c.id && !co.is_drink)).map(c => (
+                        <option key={c.id} value={c.id} className="bg-gray-900">{c.name} ({c.stock} {c.unit})</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number" min={1} step={1} value={newCompQty || ''}
+                      onChange={e => setNewCompQty(parseFloat(e.target.value) || 1)}
+                      placeholder="Qté"
+                      className="w-16 bg-white/5 border border-white/10 rounded-xl px-2 py-2 text-white text-xs text-center focus:outline-none focus:border-blue-500/50"
+                    />
+                    <button type="button" onClick={() => setNewCompIsDrink(!newCompIsDrink)}
+                      className={`px-2 py-2 rounded-xl text-xs font-medium border transition-all ${newCompIsDrink ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' : 'bg-white/5 border-white/10 text-white/40'}`}
+                      title="Marquer comme boisson"
+                    >
+                      Boisson
+                    </button>
+                    <button type="button" onClick={addComposition} disabled={!newCompComponentId}
+                      className="px-3 py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/25 text-blue-200 text-xs font-medium transition-all disabled:opacity-30">
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                  {newCompIsDrink && (
+                    <select
+                      value={newCompDrinkChoice} onChange={e => setNewCompDrinkChoice(e.target.value as DrinkChoice)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-blue-500/50"
+                    >
+                      <option value="fixed" className="bg-gray-900">Boisson fixe (toujours incluse)</option>
+                      <option value="choice" className="bg-gray-900">Boisson au choix (le caissier choisit parmi les boissons du produit)</option>
+                    </select>
+                  )}
+                  {compositions.length === 0 && (
+                    <p className="text-white/30 text-xs">Aucune composition définie. Ce produit ne génèrera aucun mouvement de stock de composants.</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
-
-        {/* Footer */}
         <div className="sticky bottom-0 px-6 py-4 border-t border-white/8 bg-gray-950/80 backdrop-blur-xl flex gap-3">
           <motion.button
             type="submit"

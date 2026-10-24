@@ -3,9 +3,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { LayoutDashboard, ArrowUpDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useTenant } from '../context/TenantContext';
+import { useSettings } from '../context/SettingsContext';
 import { InventoryDashboard } from '../components/inventory/InventoryDashboard';
 import { StockMovements } from '../components/inventory/StockMovements';
-import type { Product, Category } from '../types/database';
+import type { Product, Category, ProductComponent } from '../types/database';
 
 type Tab = 'dashboard' | 'movements';
 
@@ -16,19 +17,23 @@ const tabs: { id: Tab; label: string; icon: React.ComponentType<{ size?: number;
 
 export function InventoryPage() {
   const { currentSite } = useTenant();
+  const { settings } = useSettings();
   const siteId = currentSite?.id ?? null;
   const [tab, setTab] = useState<Tab>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [components, setComponents] = useState<ProductComponent[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
-    const [prodRes, catRes] = await Promise.all([
+    const [prodRes, catRes, compRes] = await Promise.all([
       supabase.from('products').select('*').eq('site_id', siteId).order('name'),
       supabase.from('categories').select('*').eq('site_id', siteId).order('sort_order'),
+      supabase.from('product_components').select('*').eq('site_id', siteId).order('name'),
     ]);
     if (prodRes.data) setProducts(prodRes.data as Product[]);
     if (catRes.data) setCategories(catRes.data as Category[]);
+    if (compRes.data) setComponents(compRes.data as ProductComponent[]);
     setLoading(false);
   }, [siteId]);
 
@@ -79,7 +84,11 @@ export function InventoryPage() {
           )}
           {tab === 'movements' && (
             <motion.div key="movements" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <StockMovements products={products} />
+              <StockMovements
+                products={products}
+                components={components}
+                useComponentStock={settings.component_stock_enabled}
+              />
             </motion.div>
           )}
         </AnimatePresence>

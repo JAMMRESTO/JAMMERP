@@ -29,7 +29,7 @@ export function LossesManager({ losses, products, ingredients, siteId, onRefresh
   // Form state
   const [itemType, setItemType] = useState<'product' | 'ingredient'>('product');
   const [selectedId, setSelectedId] = useState('');
-  const [quantity, setQuantity] = useState<number>(1);
+  const [quantity, setQuantity] = useState('');
   const [reason, setReason] = useState<LossReason>('breakage');
   const [notes, setNotes] = useState('');
 
@@ -56,7 +56,8 @@ export function LossesManager({ losses, products, ingredients, siteId, onRefresh
   }, [filteredLosses]);
 
   async function handleDeclare() {
-    if (!siteId || !selectedId || quantity <= 0) return;
+    const qty = parseFloat(quantity) || 0;
+    if (!siteId || !selectedId || qty <= 0) return;
     setSaving(true);
 
     let itemName = '';
@@ -70,7 +71,7 @@ export function LossesManager({ losses, products, ingredients, siteId, onRefresh
         unit = prod.unit || 'pcs';
         unitCost = prod.cost_price || 0;
         if (prod.track_stock) {
-          await supabase.from('products').update({ stock: Math.max(0, (prod.stock || 0) - quantity) }).eq('id', prod.id);
+          await supabase.from('products').update({ stock: Math.max(0, (prod.stock || 0) - qty) }).eq('id', prod.id);
         }
       }
     } else {
@@ -79,7 +80,7 @@ export function LossesManager({ losses, products, ingredients, siteId, onRefresh
         itemName = ing.name;
         unit = ing.unit;
         unitCost = Number(ing.cost_per_unit);
-        await supabase.from('ingredients').update({ stock: Math.max(0, Number(ing.stock) - quantity) }).eq('id', ing.id);
+        await supabase.from('ingredients').update({ stock: Math.max(0, Number(ing.stock) - qty) }).eq('id', ing.id);
       }
     }
 
@@ -88,10 +89,10 @@ export function LossesManager({ losses, products, ingredients, siteId, onRefresh
       product_id: itemType === 'product' ? selectedId : null,
       ingredient_id: itemType === 'ingredient' ? selectedId : null,
       item_name: itemName,
-      quantity,
+      quantity: qty,
       unit,
       unit_cost: unitCost,
-      total_cost: unitCost * quantity,
+      total_cost: unitCost * qty,
       reason,
       notes: notes.trim() || null,
     });
@@ -99,7 +100,7 @@ export function LossesManager({ losses, products, ingredients, siteId, onRefresh
     setSaving(false);
     setShowForm(false);
     setSelectedId('');
-    setQuantity(1);
+    setQuantity('');
     setNotes('');
     onRefresh();
   }
@@ -225,7 +226,7 @@ export function LossesManager({ losses, products, ingredients, siteId, onRefresh
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-white/40 text-[10px] font-medium block mb-1">Quantite *</label>
-                    <input type="number" min={0.01} step={0.01} value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/40" />
+                    <input type="number" min={0.01} step={0.01} value={quantity} onChange={e => setQuantity(e.target.value)} placeholder="0" className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/40" />
                   </div>
                   <div>
                     <label className="text-white/40 text-[10px] font-medium block mb-1">Motif *</label>
@@ -243,7 +244,7 @@ export function LossesManager({ losses, products, ingredients, siteId, onRefresh
                 </div>
               </div>
 
-              <button onClick={handleDeclare} disabled={saving || !selectedId || quantity <= 0} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-sm font-medium transition-colors">
+              <button onClick={handleDeclare} disabled={saving || !selectedId || (parseFloat(quantity) || 0) <= 0} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-sm font-medium transition-colors">
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 Declarer la perte
               </button>

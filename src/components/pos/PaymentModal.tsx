@@ -124,9 +124,19 @@ export function PaymentModal({ onClose, onSuccess, onDeferred }: PaymentModalPro
 
     const result = await completeSale(paymentsToSubmit);
     setLoading(false);
-    if (result) {
-      onSuccess({ sale: result.sale, items: result.items, payments: paymentsToSubmit });
+    if (!result) {
+      toast('error', 'La vente n\'a pas pu être enregistrée. Vérifiez votre connexion et réessayez.');
+      return;
     }
+    if ('error' in result) {
+      if (result.error === 'insufficient_stock' && result.componentName) {
+        toast('error', `Stock insuffisant pour « ${result.componentName} ». Il faut ${result.needed} mais seulement ${result.available} disponible(s).`);
+      } else {
+        toast('error', 'La vente a échoué lors de la vérification du stock. Réessayez ou contactez le support.');
+      }
+      return;
+    }
+    onSuccess({ sale: result.sale, items: result.items, payments: paymentsToSubmit });
   }
 
   return (

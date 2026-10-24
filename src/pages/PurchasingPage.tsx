@@ -8,7 +8,7 @@ import { PurchaseOrdersManager } from '../components/purchasing/PurchaseOrdersMa
 import { CostAnalysis } from '../components/purchasing/CostAnalysis';
 import { LossesManager } from '../components/purchasing/LossesManager';
 import { PurchasingReports } from '../components/purchasing/PurchasingReports';
-import type { Supplier, PurchaseOrder, PurchaseOrderItem, SupplierInvoice, Loss, Ingredient, Product, Recipe, RecipeItem } from '../types/database';
+import type { Supplier, PurchaseOrder, PurchaseOrderItem, SupplierInvoice, Loss, Ingredient, Product, Recipe, RecipeItem, ProductComponent } from '../types/database';
 
 type Tab = 'suppliers' | 'orders' | 'costs' | 'losses' | 'reports';
 
@@ -35,22 +35,24 @@ export function PurchasingPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [recipeItems, setRecipeItems] = useState<RecipeItem[]>([]);
+  const [components, setComponents] = useState<ProductComponent[]>([]);
 
   const loadData = useCallback(async () => {
     if (!siteId) { setLoading(false); return; }
     setLoading(true);
 
     try {
-      const [suppRes, ordRes, itemsRes, invRes, lossRes, ingRes, prodRes, recRes, riRes] = await Promise.all([
+      const [suppRes, ordRes, itemsRes, invRes, lossRes, ingRes, prodRes, recRes, riRes, compRes] = await Promise.all([
         supabase.from('suppliers').select('*').eq('site_id', siteId).order('name'),
         supabase.from('purchase_orders').select('*').eq('site_id', siteId).order('created_at', { ascending: false }),
         supabase.from('purchase_order_items').select('*').eq('site_id', siteId),
         supabase.from('supplier_invoices').select('*').eq('site_id', siteId).order('invoice_date', { ascending: false }),
         supabase.from('losses').select('*').eq('site_id', siteId).order('declared_at', { ascending: false }),
         supabase.from('ingredients').select('*').eq('site_id', siteId).eq('is_active', true).order('name'),
-        supabase.from('products').select('*').eq('site_id', siteId).eq('is_available', true).order('name'),
+        supabase.from('products').select('*').eq('site_id', siteId).eq('is_archived', false).order('name'),
         supabase.from('recipes').select('*').eq('site_id', siteId).eq('is_active', true).order('name'),
         supabase.from('recipe_items').select('*').eq('site_id', siteId),
+        supabase.from('product_components').select('*').eq('site_id', siteId).eq('is_active', true).order('name'),
       ]);
 
       setSuppliers((suppRes.data ?? []) as Supplier[]);
@@ -62,6 +64,7 @@ export function PurchasingPage() {
       setProducts((prodRes.data ?? []) as Product[]);
       setRecipes((recRes.data ?? []) as Recipe[]);
       setRecipeItems((riRes.data ?? []) as RecipeItem[]);
+      setComponents((compRes.data ?? []) as ProductComponent[]);
     } catch (err) {
       console.warn('[PurchasingPage] Failed to load data:', err);
     }
@@ -130,6 +133,7 @@ export function PurchasingPage() {
                 invoices={invoices}
                 ingredients={ingredients}
                 products={products}
+                components={components}
                 siteId={siteId}
                 onRefresh={loadData}
               />

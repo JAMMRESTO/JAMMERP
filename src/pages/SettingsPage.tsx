@@ -10,7 +10,7 @@ import { UserManagement } from '../components/auth/UserManagement';
 import { SiteManagersPanel } from '../components/auth/SiteManagersPanel';
 import { useTenant } from '../context/TenantContext';
 import { supabase } from '../lib/supabase';
-import { printTestTicket } from '../lib/escpos';
+import { printTestTicket, printTestTicketForRole, type PrinterRole } from '../lib/escpos';
 
 type TabId = 'general' | 'financial' | 'appearance' | 'modules' | 'users' | 'managers';
 
@@ -508,6 +508,124 @@ function PrinterConnectionCard() {
   );
 }
 
+function DualPrinterConnectionCard() {
+  const {
+    supported, cashConnected, kitchenConnected, cashError, kitchenError,
+    connectRole, disconnectRole,
+  } = usePrinter();
+  const { settings } = useSettings();
+  const { currentSite } = useTenant();
+  const siteId = currentSite?.id ?? 'default';
+  const toast = useToast();
+  const [cashConnecting, setCashConnecting] = useState(false);
+  const [kitchenConnecting, setKitchenConnecting] = useState(false);
+  const [cashTesting, setCashTesting] = useState(false);
+  const [kitchenTesting, setKitchenTesting] = useState(false);
+
+  async function handleConnect(role: PrinterRole) {
+    if (role === 'cash') setCashConnecting(true); else setKitchenConnecting(true);
+    const ok = await connectRole(role);
+    if (role === 'cash') setCashConnecting(false); else setKitchenConnecting(false);
+    if (ok) toast('success', `Imprimante ${role === 'cash' ? 'caisse' : 'cuisine'} connectée`);
+    else toast('error', (role === 'cash' ? cashError : kitchenError) ?? 'Connexion échouée');
+  }
+
+  async function handleDisconnect(role: PrinterRole) {
+    await disconnectRole(role);
+    toast('success', `Imprimante ${role === 'cash' ? 'caisse' : 'cuisine'} déconnectée`);
+  }
+
+  async function handleTest(role: PrinterRole) {
+    if (role === 'cash') setCashTesting(true); else setKitchenTesting(true);
+    const ok = await printTestTicketForRole(role, settings.restaurant_name);
+    if (role === 'cash') setCashTesting(false); else setKitchenTesting(false);
+    if (ok) toast('success', `Ticket test ${role === 'cash' ? 'caisse' : 'cuisine'} envoyé`);
+    else toast('error', `Échec impression test ${role === 'cash' ? 'caisse' : 'cuisine'}`);
+  }
+
+  function renderPrinterSlot(role: PrinterRole, label: string, connected: boolean, error: string | null, connecting: boolean, testing: boolean) {
+    return (
+      <div className="flex-1 rounded-xl border border-white/8 bg-white/3 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${connected ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-white/5 border border-white/10'}`}>
+              <Usb size={16} className={connected ? 'text-emerald-400' : 'text-white/30'} />
+            </div>
+            <div>
+              <p className="text-white text-sm font-medium">{label}</p>
+              <p className="text-white/30 text-xs">{connected ? 'Connectée' : 'Non connectée'}</p>
+            </div>
+          </div>
+          {connected ? (
+            <button
+              onClick={() => handleDisconnect(role)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-xs font-medium transition-all"
+            >
+              <X size={12} /> Déconnecter
+            </button>
+          ) : (
+            <button
+              onClick={() => handleConnect(role)}
+              disabled={connecting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-medium transition-all"
+            >
+              {connecting ? <div className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <Usb size={12} />}
+              {connecting ? '...' : 'Connecter'}
+            </button>
+          )}
+        </div>
+        {error && !connected && (
+          <p className="text-red-400/70 text-xs">{error}</p>
+        )}
+        {connected && (
+          <button
+            onClick={() => handleTest(role)}
+            disabled={testing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/8 hover:bg-white/14 border border-white/10 text-white/70 text-xs font-medium transition-all disabled:opacity-50"
+          >
+            {testing ? <div className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <Printer size={12} />}
+            {testing ? 'Envoi...' : 'Ticket test'}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (!supported) {
+    return (
+      <div className="glass-card rounded-2xl p-6 border border-white/8">
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/8 border border-amber-500/20">
+          <Usb size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-amber-300 text-sm font-medium">Navigateur non compatible</p>
+            <p className="text-amber-400/60 text-xs mt-1">WebUSB est requis. Utilisez Google Chrome ou Edge sur ordinateur.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="glass-card rounded-2xl p-6 border border-white/8 space-y-4">
+      <h3 className="text-white font-semibold text-base flex items-center gap-2">
+        <Printer size={16} className="text-cyan-400" /> Imprimantes USB (Caisse + Cuisine)
+      </h3>
+      <p className="text-white/40 text-xs">
+        Branchez deux imprimantes USB. Associez chaque imprimante à son rôle (caisse ou cuisine). Le ticket de caisse et le ticket de cuisine sont envoyés simultanément sur leurs imprimantes respectives.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-3">
+        {renderPrinterSlot('cash', 'Imprimante Caisse', cashConnected, cashError, cashConnecting, cashTesting)}
+        {renderPrinterSlot('kitchen', 'Imprimante Cuisine', kitchenConnected, kitchenError, kitchenConnecting, kitchenTesting)}
+      </div>
+      <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/8 border border-amber-500/15">
+        <p className="text-amber-400/70 text-[11px] leading-relaxed">
+          Si vous branchez deux modèles identiques, associez-les un par un pour éviter d'inverser les rôles. Chaque imprimante est mémorisée sur ce poste pour ce restaurant.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const { settings, updateSetting } = useSettings();
   const { isSiteManager, sites, currentSite } = useTenant();
@@ -541,8 +659,10 @@ export function SettingsPage() {
     receipt_footer: settings.receipt_footer,
     auto_print_receipt: settings.auto_print_receipt ?? false,
     print_kitchen_with_receipt: settings.print_kitchen_with_receipt ?? false,
+    dual_printer_mode: settings.dual_printer_mode ?? false,
     sauces_enabled: settings.sauces_enabled ?? false,
     flavors_enabled: settings.flavors_enabled ?? false,
+    component_stock_enabled: settings.component_stock_enabled ?? false,
     active_modules: { ...settings.active_modules },
     dashboard_widgets: { ...settings.dashboard_widgets },
   });
@@ -565,8 +685,11 @@ export function SettingsPage() {
       receipt_footer: settings.receipt_footer,
       auto_print_receipt: settings.auto_print_receipt ?? false,
       print_kitchen_with_receipt: settings.print_kitchen_with_receipt ?? false,
+      dual_printer_mode: settings.dual_printer_mode ?? false,
       sauces_enabled: settings.sauces_enabled ?? false,
       flavors_enabled: settings.flavors_enabled ?? false,
+      stock_portion_enabled: settings.stock_portion_enabled ?? false,
+      component_stock_enabled: settings.component_stock_enabled ?? false,
       active_modules: { ...settings.active_modules },
       dashboard_widgets: { ...settings.dashboard_widgets },
     });
@@ -590,8 +713,11 @@ export function SettingsPage() {
       updateSetting('receipt_footer', form.receipt_footer),
       updateSetting('auto_print_receipt', form.auto_print_receipt),
       updateSetting('print_kitchen_with_receipt', form.print_kitchen_with_receipt),
+      updateSetting('dual_printer_mode', form.dual_printer_mode),
       updateSetting('sauces_enabled', form.sauces_enabled),
       updateSetting('flavors_enabled', form.flavors_enabled),
+      updateSetting('stock_portion_enabled', form.stock_portion_enabled),
+      updateSetting('component_stock_enabled', form.component_stock_enabled),
       updateSetting('active_modules', form.active_modules),
       updateSetting('dashboard_widgets', form.dashboard_widgets),
     ]);
@@ -827,8 +953,28 @@ export function SettingsPage() {
                 />
               </div>
 
+              {/* Dual printer mode toggle */}
+              <div
+                className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${form.dual_printer_mode ? '' : 'border-white/8 bg-white/3'}`}
+                style={form.dual_printer_mode ? {
+                  borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
+                } : undefined}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm">Deux imprimantes USB (Caisse + Cuisine)</p>
+                  <p className="text-white/30 text-xs mt-0.5">
+                    Associez une imprimante pour les reçus caisse et une autre pour les tickets cuisine. Chaque ticket est envoyé sur son imprimante dédiée.
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.dual_printer_mode}
+                  onChange={v => setForm(f => ({ ...f, dual_printer_mode: v }))}
+                />
+              </div>
+
               {/* Printer connection */}
-              <PrinterConnectionCard />
+              {form.dual_printer_mode ? <DualPrinterConnectionCard /> : <PrinterConnectionCard />}
               <div
                 style={form.sauces_enabled ? {
                   borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
@@ -862,6 +1008,42 @@ export function SettingsPage() {
                 <Toggle
                   checked={form.flavors_enabled}
                   onChange={v => setForm(f => ({ ...f, flavors_enabled: v }))}
+                />
+              </div>
+              <div
+                className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${form.stock_portion_enabled ? '' : 'border-white/8 bg-white/3'}`}
+                style={form.stock_portion_enabled ? {
+                  borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
+                } : undefined}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm">Quantités de stock par portion</p>
+                  <p className="text-white/30 text-xs mt-0.5">
+                    Permet de paramétrer dans chaque produit combien d'unités de stock sont déduites par portion vendue. Exemple : une portion de 4 tenders déduit 4 pièces du stock.
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.stock_portion_enabled}
+                  onChange={v => setForm(f => ({ ...f, stock_portion_enabled: v }))}
+                />
+              </div>
+              <div
+                className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${form.component_stock_enabled ? '' : 'border-white/8 bg-white/3'}`}
+                style={form.component_stock_enabled ? {
+                  borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
+                } : undefined}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm">Gestion du stock par composants</p>
+                  <p className="text-white/30 text-xs mt-0.5">
+                    Sépare les produits vendus des composants stockés. Le stock est géré sur les composants (achats, inventaire) et consommé automatiquement selon la composition de chaque produit.
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.component_stock_enabled}
+                  onChange={v => setForm(f => ({ ...f, component_stock_enabled: v }))}
                 />
               </div>
             </div>

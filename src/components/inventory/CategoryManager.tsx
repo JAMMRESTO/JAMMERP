@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
+  Plus, Pencil, Trash2, Archive, Check, X, ToggleLeft, ToggleRight,
   Salad, Utensils, Flame, Fish, GlassWater, Cake, Sandwich,
   Coffee, Package, BarChart3, AlertTriangle, type LucideIcon
 } from 'lucide-react';
@@ -305,9 +305,9 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
 
   async function confirmDelete() {
     if (!pendingDelete) return;
-    const { error } = await supabase.from('categories').delete().eq('id', pendingDelete.id);
-    if (error) { toast('error', 'Impossible de supprimer cette catégorie'); return; }
-    toast('success', 'Catégorie supprimée');
+    const { error } = await supabase.from('categories').update({ is_active: false }).eq('id', pendingDelete.id);
+    if (error) { toast('error', 'Impossible d\'archiver cette catégorie'); return; }
+    toast('success', 'Catégorie archivée');
     setPendingDelete(null);
     onRefresh();
   }
@@ -403,9 +403,10 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                   </button>
                   <button
                     onClick={() => setPendingDelete(cat)}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                    title="Archiver"
                   >
-                    <Trash2 size={14} />
+                    <Archive size={14} />
                   </button>
                 </div>
               </motion.div>
@@ -435,9 +436,9 @@ n            initial={{ opacity: 0, scale: 0.95 }}
                   <AlertTriangle size={20} className="text-red-400" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-white font-semibold text-base">Supprimer la catégorie</h3>
+                  <h3 className="text-white font-semibold text-base">Archiver la catégorie</h3>
                   <p className="text-white/50 text-sm mt-1">
-                    Voulez-vous vraiment supprimer la categorie <span className="text-white font-medium">{pendingDelete.name}</span> ? Cette action est irreversible. Les produits de cette categorie seront detachés mais conservés.
+                    <span className="text-white font-medium">{pendingDelete.name}</span> sera archivée. Elle ne sera plus proposée pour les nouveaux produits mais restera visible dans les rapports. Vous pourrez la restaurer à tout moment.
                   </p>
                 </div>
               </div>
@@ -450,9 +451,9 @@ n            initial={{ opacity: 0, scale: 0.95 }}
                 </button>
                 <button
                   onClick={confirmDelete}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-all shadow-lg shadow-red-600/25"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium transition-all shadow-lg shadow-amber-600/25"
                 >
-                  Supprimer
+                  Archiver
                 </button>
               </div>
             </motion.div>

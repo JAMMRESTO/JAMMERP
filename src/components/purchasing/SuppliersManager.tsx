@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, Phone, Mail, MapPin, Edit2, Trash2, X, Save, Loader2, User, TrendingUp, Package, Truck } from 'lucide-react';
+import { Plus, Search, Phone, Mail, MapPin, Edit2, Trash2, X, Save, Loader2, User, TrendingUp, Package, Truck, Archive, RotateCcw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useToast } from '../ui/Toast';
 import type { Supplier, PurchaseOrder, SupplierInvoice } from '../../types/database';
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function SuppliersManager({ suppliers, orders, invoices, siteId, onRefresh }: Props) {
+  const toast = useToast();
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
@@ -26,8 +28,10 @@ export function SuppliersManager({ suppliers, orders, invoices, siteId, onRefres
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
 
+  const [showArchived, setShowArchived] = useState(false);
+
   const filtered = suppliers.filter(s =>
-    s.is_active && (
+    (showArchived || s.is_active) && (
       s.name.toLowerCase().includes(search.toLowerCase()) ||
       (s.contact_name || '').toLowerCase().includes(search.toLowerCase())
     )
@@ -80,7 +84,18 @@ export function SuppliersManager({ suppliers, orders, invoices, siteId, onRefres
   }
 
   async function handleDelete(id: string) {
-    await supabase.from('suppliers').update({ is_active: false }).eq('id', id);
+    const supplier = suppliers.find(s => s.id === id);
+    if (supplier && !confirm(`Archiver le fournisseur « ${supplier.name} » ?\nIl sera masqué des nouvelles opérations mais restera visible dans l'historique.`)) return;
+    const { error } = await supabase.from('suppliers').update({ is_active: false }).eq('id', id);
+    if (error) { toast('error', 'Erreur lors de l\'archivage'); return; }
+    toast('success', 'Fournisseur archivé');
+    onRefresh();
+  }
+
+  async function handleRestore(id: string, name: string) {
+    const { error } = await supabase.from('suppliers').update({ is_active: true }).eq('id', id);
+    if (error) { toast('error', 'Erreur lors de la restauration'); return; }
+    toast('success', `${name} restauré`);
     onRefresh();
   }
 
@@ -195,6 +210,12 @@ export function SuppliersManager({ suppliers, orders, invoices, siteId, onRefres
           />
         </div>
         <button
+          onClick={() => setShowArchived(s => !s)}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${showArchived ? 'bg-amber-600/20 border border-amber-500/30 text-amber-400' : 'bg-white/[0.04] border border-white/[0.08] text-white/40 hover:text-amber-400'}`}
+        >
+          <Archive size={13} /> {showArchived ? 'Archivés' : 'Voir archivés'}
+        </button>
+        <button
           onClick={() => openForm()}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
         >
@@ -239,12 +260,20 @@ export function SuppliersManager({ suppliers, orders, invoices, siteId, onRefres
                     </div>
                   </div>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => openForm(s)} className="p-1.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-white/40 hover:text-white/70 transition-colors">
-                      <Edit2 size={11} />
-                    </button>
-                    <button onClick={() => handleDelete(s.id)} className="p-1.5 rounded bg-white/[0.05] hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors">
-                      <Trash2 size={11} />
-                    </button>
+                    {s.is_active ? (
+                      <>
+                        <button onClick={() => openForm(s)} className="p-1.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-white/40 hover:text-white/70 transition-colors">
+                          <Edit2 size={11} />
+                        </button>
+                        <button onClick={() => handleDelete(s.id)} className="p-1.5 rounded bg-white/[0.05] hover:bg-amber-500/20 text-white/40 hover:text-amber-400 transition-colors" title="Archiver">
+                          <Archive size={11} />
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={() => handleRestore(s.id, s.name)} className="p-1.5 rounded bg-white/[0.05] hover:bg-amber-500/20 text-amber-400 transition-colors" title="Restaurer">
+                        <RotateCcw size={11} />
+                      </button>
+                    )}
                   </div>
                 </div>
 

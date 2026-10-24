@@ -23,6 +23,7 @@ const OnlineOrdersPage = lazy(() => import('../../pages/OnlineOrdersPage').then(
 const CashSessionsPage = lazy(() => import('../../pages/CashSessionsPage').then(m => ({ default: m.CashSessionsPage })));
 const PurchasingPage = lazy(() => import('../../pages/PurchasingPage').then(m => ({ default: m.PurchasingPage })));
 const ExpensesPage = lazy(() => import('../../pages/ExpensesPage').then(m => ({ default: m.ExpensesPage })));
+const ComponentsPage = lazy(() => import('../../pages/ComponentsPage').then(m => ({ default: m.ComponentsPage })));
 
 function PageLoader() {
   return (
@@ -59,7 +60,7 @@ export function MainLayout() {
   }
 
   const isPOS = activePage === 'pos';
-  const isFullHeight = ['products', 'categories', 'inventory', 'tables', 'kitchen', 'delivery', 'production', 'purchasing', 'reports', 'online_orders', 'cash_sessions', 'expenses'].includes(activePage);
+  const isFullHeight = ['products', 'categories', 'inventory', 'components', 'tables', 'kitchen', 'delivery', 'production', 'purchasing', 'reports', 'online_orders', 'cash_sessions', 'expenses'].includes(activePage);
 
   function renderPage() {
     switch (activePage) {
@@ -69,6 +70,7 @@ export function MainLayout() {
       case 'products': return <ProductsPage />;
       case 'categories': return <CategoriesPage />;
       case 'inventory': return <InventoryPage />;
+      case 'components': return <ComponentsPage />;
       case 'tables': return <TablesPage />;
       case 'kitchen': return <KitchenPage />;
       case 'delivery': return <DeliveryPage />;

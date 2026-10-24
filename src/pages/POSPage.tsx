@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, ShoppingCart, Package, Truck, Utensils, ChevronDown, User, Clock, Lock, Power, CreditCard, Archive, Receipt, FileBarChart, Menu } from 'lucide-react';
 import { supabase, forceCloseApp } from '../lib/supabase';
-import { printCombined, printReceipt, openCashDrawer, filterKitchenCartItems, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
+import { printCombined, printReceipt, printReceiptForRole, printKitchenTicketForRole, openCashDrawer, filterKitchenCartItems, type EscposKitchenData, type EscposReceiptData } from '../lib/escpos';
 import { usePrinter } from '../context/PrinterContext';
 import { useRealtimeTable } from '../lib/useRealtimeTable';
 import { POSProvider, usePOS } from '../context/POSContext';
@@ -142,7 +142,7 @@ function POSInner({ onMenuToggle }: { onMenuToggle: () => void }) {
     setLoading(true);
     const [catRes, prodRes] = await Promise.all([
       supabase.from('categories').select('*').eq('site_id', siteId).eq('is_active', true).order('sort_order'),
-      supabase.from('products').select('*').eq('site_id', siteId).or('is_available.eq.true,track_stock.eq.false').order('name'),
+      supabase.from('products').select('*').eq('site_id', siteId).eq('is_archived', false).or('is_available.eq.true,track_stock.eq.false').order('name'),
     ]);
     if (catRes.data) setCategories(catRes.data as Category[]);
     if (prodRes.data) setProducts(prodRes.data as Product[]);
@@ -160,10 +160,10 @@ function POSInner({ onMenuToggle }: { onMenuToggle: () => void }) {
   useRealtimeTable<Product>({
     table: 'products',
     siteId,
-    onInsert: (row) => { if (row.is_available || !row.track_stock) setProducts(p => p.some(x => x.id === row.id) ? p : [...p, row].sort((a, b) => a.name.localeCompare(b.name))); },
+    onInsert: (row) => { if (!row.is_archived && (row.is_available || !row.track_stock)) setProducts(p => p.some(x => x.id === row.id) ? p : [...p, row].sort((a, b) => a.name.localeCompare(b.name))); },
     onUpdate: (row) => setProducts(p => {
       const without = p.filter(x => x.id !== row.id);
-      return (row.is_available || !row.track_stock) ? [...without, row].sort((a, b) => a.name.localeCompare(b.name)) : without;
+      return (!row.is_archived && (row.is_available || !row.track_stock)) ? [...without, row].sort((a, b) => a.name.localeCompare(b.name)) : without;
     }),
     onDelete: (row) => setProducts(p => p.filter(x => x.id !== row.id)),
     onReconnect: () => { loadData(); },
@@ -191,7 +191,7 @@ function POSInner({ onMenuToggle }: { onMenuToggle: () => void }) {
     return list;
   }, [products, selectedCategoryId, search]);
 
-  function handlePaymentSuccess(result: { sale: { sale_number: string; created_at: string }; items: { quantity: number; product_name: string; unit_price: number; subtotal: number; variant_label?: string | null; sauces?: { name: string; price_supplement?: number }[] | null }[]; payments: { method: string; amount: number }[] }) {
+  async function handlePaymentSuccess(result: { sale: { sale_number: string; created_at: string }; items: { quantity: number; product_name: string; unit_price: number; subtotal: number; variant_label?: string | null; sauces?: { name: string; price_supplement?: number }[] | null }[]; payments: { method: string; amount: number }[] }) {
     if (paymentSuccessLock.current) return;
     paymentSuccessLock.current = true;
     setTimeout(() => { paymentSuccessLock.current = false; }, 1500);
@@ -228,7 +228,21 @@ function POSInner({ onMenuToggle }: { onMenuToggle: () => void }) {
         })),
       };
 
-      if (settings.print_kitchen_with_receipt) {
+      if (settings.dual_printer_mode) {
+        const results = await Promise.allSettled([
+          printReceiptForRole('cash', receiptData, settings),
+          kitchenItems.length > 0
+            ? printKitchenTicketForRole('kitchen', kitchenData)
+            : Promise.resolve(true),
+        ]);
+        const [cashRes, kitchenRes] = results;
+        if (cashRes.status === 'rejected' || (cashRes.status === 'fulfilled' && !cashRes.value)) {
+          toast('error', 'Échec impression caisse — réimprimable depuis l\'historique');
+        }
+        if (kitchenItems.length > 0 && (kitchenRes.status === 'rejected' || (kitchenRes.status === 'fulfilled' && !kitchenRes.value))) {
+          toast('error', 'Échec impression cuisine — réimprimable depuis l\'historique');
+        }
+      } else if (settings.print_kitchen_with_receipt) {
         if (kitchenItems.length > 0) {
           printCombined(kitchenData, receiptData, settings);
         } else {

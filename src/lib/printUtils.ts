@@ -128,10 +128,10 @@ export const A4_CSS = `
   @media print { body { padding: 0; } @page { margin: 12mm 10mm; size: A4 portrait; } }
 `;
 
-/** CSS for A4 landscape report documents (wide tables) */
+/** CSS for A4 landscape report documents (wide tables) — now portrait for consistency */
 export const A4_CSS_LANDSCAPE = `
   ${A4_BODY_CSS}
-  @media print { body { padding: 0; } @page { margin: 10mm 10mm; size: A4 landscape; } }
+  @media print { body { padding: 0; } @page { margin: 10mm; size: A4 portrait; } }
 `;
 
 /**

@@ -32,6 +32,7 @@ export const navConfig: NavItem[] = [
   { id: 'kitchen',      label: 'Commandes',            icon: Utensils,        roles: ['admin', 'cashier'], module: 'kitchen' },
   { id: 'delivery',     label: 'Livraisons',           icon: Truck,           roles: ['admin'],            module: 'delivery' },
   { id: 'inventory',    label: 'Inventaire',           icon: FlaskConical,    roles: ['admin'],            module: 'inventory' },
+  { id: 'components',   label: 'Composants',           icon: Package,         roles: ['admin'] },
   { id: 'production',   label: 'Production',           icon: FlaskConical,    roles: ['admin'],            module: 'production' },
   { id: 'purchasing',   label: 'Achats & Fournisseurs', icon: Receipt,         roles: ['admin'],            module: 'inventory' },
   { id: 'reports',      label: 'Rapports',             icon: BarChart2,       roles: ['admin'],            module: 'reports' },

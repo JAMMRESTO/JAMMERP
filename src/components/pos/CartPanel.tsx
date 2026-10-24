@@ -15,9 +15,11 @@ import type { CartItem, Category, SaleType } from '../../types/database';
 import { formatVariantLabel } from '../../lib/variantLabel';
 
 function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
-  const { removeFromCart, updateQuantity, updateKitchenNote } = usePOS();
+  const { removeFromCart, updateQuantity, updateKitchenNote, canIncreaseQty } = usePOS();
   const { settings } = useSettings();
+  const { toast } = useToast();
   const [showNote, setShowNote] = useState(false);
+  const canIncrease = canIncreaseQty(item.id);
 
   return (
     <motion.div
@@ -73,8 +75,15 @@ function CartItemRow({ item, locked }: { item: CartItem; locked: boolean }) {
           <span className="text-white font-bold text-[10px] sm:text-xs w-4 sm:w-5 text-center">{item.quantity}</span>
           {!locked && (
             <button
-              onClick={() => updateQuantity(item.id, item.quantity + 1)}
-              className="w-5 h-5 sm:w-6 sm:h-6 rounded-md bg-white/8 hover:bg-blue-600/40 text-white/50 hover:text-white flex items-center justify-center transition-all"
+              onClick={() => {
+                if (!canIncrease.available) {
+                  toast('error', `Stock insuffisant${canIncrease.componentName ? ": " + canIncrease.componentName : ""}`);
+                  return;
+                }
+                updateQuantity(item.id, item.quantity + 1);
+              }}
+              disabled={!canIncrease.available}
+              className={`w-5 h-5 sm:w-6 sm:h-6 rounded-md flex items-center justify-center transition-all ${canIncrease.available ? 'bg-white/8 hover:bg-blue-600/40 text-white/50 hover:text-white' : 'bg-white/4 text-white/20 cursor-not-allowed'}`}
             >
               <Plus size={10} className="sm:hidden" />
               <Plus size={11} className="hidden sm:block" />

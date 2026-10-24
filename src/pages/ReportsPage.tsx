@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { esc, fmtAmt, A4_CSS, A4_CSS_LANDSCAPE, buildA4Header, printViaIframe } from '../lib/printUtils';
 import {
@@ -19,7 +19,7 @@ import { formatItemDisplayName } from '../lib/variantLabel';
 // ─────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────
-type ReportTab = 'sales' | 'products' | 'drivers' | 'stock' | 'production';
+type ReportTab = 'sales' | 'products' | 'drivers' | 'stock' | 'production' | 'cash-expenses' | 'activity';
 type PeriodPreset = 'today' | 'week' | 'month' | 'specific-month' | 'custom';
 
 interface PeriodRange {
@@ -983,35 +983,214 @@ function DriversReport({ range, sym, settings }: { range: PeriodRange; sym: stri
 // ─────────────────────────────────────────────────────────
 // STOCK REPORT
 // ─────────────────────────────────────────────────────────
-function StockReport({ sym, settings }: { sym: string; settings: PrintReportSettings }) {
+interface ComponentMovementDetail {
+  id: string;
+  date: string;
+  type: string;
+  quantity_in: number;
+  quantity_out: number;
+  stock_after: number;
+  reason: string;
+  reference_type: string;
+}
+
+interface ComponentStockRow {
+  id: string;
+  name: string;
+  initial: number;
+  entries: number;
+  outs: number;
+  available: number;
+  unit: string;
+  avg_cost: number;
+  low_stock_threshold: number;
+  movements: ComponentMovementDetail[];
+}
+
+function StockReport({ range, sym, settings }: { range: PeriodRange; sym: string; settings: PrintReportSettings }) {
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
+  const [components, setComponents] = useState<ComponentStockRow[]>([]);
   const [products, setProducts] = useState<{ name: string; stock: number | null; unit: string; cost_price: number; low_stock_threshold: number; track_stock: boolean }[]>([]);
-  const [ingredients, setIngredients] = useState<{ name: string; stock: number; unit: string; cost_per_unit: number; low_stock_threshold: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    Promise.all([
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [compRes, moveRes, prodRes] = await Promise.all([
+      supabase.from('product_components').select('id, name, stock, unit, avg_cost, low_stock_threshold').eq('site_id', siteId).eq('is_active', true).order('name'),
+      supabase.from('component_stock_movements').select('id, component_id, movement_type, quantity, created_at, reason, reference_type, stock_after').eq('site_id', siteId).gte('created_at', range.from + 'T00:00:00').lte('created_at', range.to + 'T23:59:59').order('created_at', { ascending: true }),
       supabase.from('products').select('name, stock, unit, cost_price, low_stock_threshold, track_stock').eq('site_id', siteId).eq('track_stock', true).order('name'),
-      supabase.from('ingredients').select('name, stock, unit, cost_per_unit, low_stock_threshold').eq('site_id', siteId).eq('is_active', true).order('name'),
-    ]).then(([pRes, iRes]) => {
-      if (pRes.data) setProducts(pRes.data as typeof products);
-      if (iRes.data) setIngredients(iRes.data as typeof ingredients);
-      setLoading(false);
-    });
-  }, [siteId]);
+    ]);
 
+    if (compRes.data) {
+      const movesByComp: Record<string, { entries: number; outs: number; detail: ComponentMovementDetail[] }> = {};
+      ((moveRes.data ?? []) as { id: string; component_id: string; movement_type: string; quantity: string | number; created_at: string; reason: string; reference_type: string; stock_after: number }[]).forEach(m => {
+        if (!movesByComp[m.component_id]) movesByComp[m.component_id] = { entries: 0, outs: 0, detail: [] };
+        const qty = Number(m.quantity);
+        if (m.movement_type === 'in') movesByComp[m.component_id].entries += qty;
+        if (m.movement_type === 'out') movesByComp[m.component_id].outs += qty;
+        movesByComp[m.component_id].detail.push({
+          id: m.id,
+          date: m.created_at,
+          type: m.movement_type,
+          quantity_in: m.movement_type === 'in' ? qty : 0,
+          quantity_out: m.movement_type === 'out' ? qty : 0,
+          stock_after: m.stock_after,
+          reason: m.reason ?? '',
+          reference_type: m.reference_type ?? '',
+        });
+      });
+
+      setComponents((compRes.data as { id: string; name: string; stock: string | number; unit: string; avg_cost: string | number; low_stock_threshold: number }[]).map(c => {
+        const moves = movesByComp[c.id] ?? { entries: 0, outs: 0, detail: [] };
+        const available = Number(c.stock);
+        const initial = available - moves.entries + moves.outs;
+        return {
+          id: c.id,
+          name: c.name,
+          initial,
+          entries: moves.entries,
+          outs: moves.outs,
+          available,
+          unit: c.unit,
+          avg_cost: Number(c.avg_cost),
+          low_stock_threshold: c.low_stock_threshold,
+          movements: moves.detail,
+        };
+      }));
+    }
+    if (prodRes.data) setProducts(prodRes.data as typeof products);
+    setLoading(false);
+  }, [siteId, range]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const componentValue = components.reduce((s, c) => s + c.available * c.avg_cost, 0);
   const productValue = products.reduce((s, p) => s + (p.stock ?? 0) * p.cost_price, 0);
-  const ingredientValue = ingredients.reduce((s, i) => s + i.stock * i.cost_per_unit, 0);
-  const alerts = ingredients.filter(i => i.stock <= i.low_stock_threshold && i.low_stock_threshold > 0);
-  const outOfStock = [...products.filter(p => (p.stock ?? 0) <= 0), ...ingredients.filter(i => i.stock <= 0)];
+  const alerts = components.filter(c => c.available <= c.low_stock_threshold && c.low_stock_threshold > 0);
+  const outOfStock = [...products.filter(p => (p.stock ?? 0) <= 0), ...components.filter(c => c.available <= 0)];
+
+  const handleExportComponents = () => exportToCSV(
+    ['Composant', 'Stock initial', 'Entrees', 'Sorties', 'Stock dispo', 'Unite', `Valeur (${sym})`],
+    components.map(c => [c.name, c.initial, c.entries, c.outs, c.available, c.unit, (c.available * c.avg_cost).toFixed(0)]),
+    'rapport_stock_composants'
+  );
+
+  const handlePrint = () => {
+    const fmtNum = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+    const fmtAmount = (n: number) => `${Math.round(n).toLocaleString('fr-FR')}\u00a0${sym}`;
+    const totalValue = components.reduce((s, c) => s + c.available * c.avg_cost, 0);
+
+    const rangeLabel = range.from === range.to
+      ? new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+      : `Du ${new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} au ${new Date(range.to).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+
+    const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const docHeader = buildA4Header(settings);
+
+    const typeLabel = (t: string) => t === 'in' ? 'Entrée' : t === 'out' ? 'Sortie' : 'Ajustement';
+    const refLabel = (r: string) => r === 'sale' ? 'Vente' : r === 'purchase_order' ? 'Réception achat' : r === 'manual' ? 'Manuel' : r === 'adjustment' ? 'Ajustement' : r === 'production' ? 'Production' : r === 'stock_decrement' ? 'Décrément stock' : r === 'order' ? 'Commande' : r || '—';
+
+    // Summary table
+    const summaryRowsHtml = components.map(c => `
+      <tr>
+        <td>${esc(c.name)}</td>
+        <td class="text-right">${fmtNum(c.initial)} ${esc(c.unit)}</td>
+        <td class="text-right">${fmtNum(c.entries)} ${esc(c.unit)}</td>
+        <td class="text-right">${fmtNum(c.outs)} ${esc(c.unit)}</td>
+        <td class="text-right">${fmtNum(c.available)} ${esc(c.unit)}</td>
+        <td class="text-right">${fmtAmount(c.available * c.avg_cost)}</td>
+      </tr>
+    `).join('');
+
+    // Per-component movement detail
+    const detailHtml = components.map(c => {
+      if (c.movements.length === 0) return '';
+      const movRows = c.movements.map(m => `
+        <tr>
+          <td>${esc(new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }))} ${esc(new Date(m.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }))}</td>
+          <td>${esc(typeLabel(m.type))}</td>
+          <td>${esc(refLabel(m.reference_type))}</td>
+          <td class="text-right">${m.quantity_in > 0 ? fmtNum(m.quantity_in) : ''}</td>
+          <td class="text-right">${m.quantity_out > 0 ? fmtNum(m.quantity_out) : ''}</td>
+          <td class="text-right">${fmtNum(m.stock_after)}</td>
+        </tr>
+      `).join('');
+      return `
+        <h3 style="margin-top:14px;">${esc(c.name)}</h3>
+        <p style="font-size:9pt;color:#333;margin-bottom:4px;">Stock initial: ${fmtNum(c.initial)} ${esc(c.unit)} — Entrées: ${fmtNum(c.entries)} ${esc(c.unit)} — Sorties: ${fmtNum(c.outs)} ${esc(c.unit)} — Stock final: ${fmtNum(c.available)} ${esc(c.unit)}</p>
+        <table>
+          <colgroup><col style="width:18%;"><col style="width:12%;"><col style="width:20%;"><col style="width:15%;"><col style="width:15%;"><col style="width:15%;"></colgroup>
+          <thead><tr><th>Date</th><th>Type</th><th>Origine</th><th class="text-right">Entrée</th><th class="text-right">Sortie</th><th class="text-right">Solde après</th></tr></thead>
+          <tbody>${movRows}</tbody>
+        </table>
+      `;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Rapport Stock — Composants</title>
+  <style>${A4_CSS_LANDSCAPE}</style>
+</head>
+<body>
+  ${docHeader}
+  <h2>Rapport Stock — Composants</h2>
+  <p class="subtitle">${esc(rangeLabel)} — édité le ${esc(dateStr)}</p>
+  <hr class="sep">
+  <h3>Récapitulatif</h3>
+  ${components.length > 0
+    ? `<table>
+      <colgroup>
+        <col style="width:22%;">
+        <col style="width:15%;">
+        <col style="width:15%;">
+        <col style="width:15%;">
+        <col style="width:15%;">
+        <col style="width:18%;">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Composants</th>
+          <th class="text-right">Stock initial</th>
+          <th class="text-right">Entrées</th>
+          <th class="text-right">Sorties</th>
+          <th class="text-right">Stock final</th>
+          <th class="text-right">Valeur</th>
+        </tr>
+      </thead>
+      <tbody>${summaryRowsHtml}</tbody>
+      <tfoot>
+        <tr class="total-row">
+          <td>Total</td>
+          <td></td><td></td><td></td>
+          <td></td>
+          <td class="text-right">${fmtAmount(totalValue)}</td>
+        </tr>
+      </tfoot>
+    </table>`
+    : `<p style="color:#333;font-size:10pt;margin-top:12px;">Aucune donnée à afficher.</p>`
+  }
+  <h3 style="margin-top:18px;">Détail des mouvements par composant</h3>
+  ${detailHtml || `<p style="color:#333;font-size:10pt;margin-top:8px;">Aucun mouvement sur cette période.</p>`}
+  <div class="doc-footer">
+    <span>${esc(settings.restaurant_name)}</span>
+    <span>Rapport Stock — Composants — ${esc(rangeLabel)}</span>
+  </div>
+</body>
+</html>`;
+    printViaIframe(html);
+  };
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Valeur produits" value={productValue.toLocaleString('fr-FR')} sub={sym} color="text-blue-400" />
-        <StatCard label="Valeur ingrédients" value={ingredientValue.toLocaleString('fr-FR')} sub={sym} color="text-emerald-400" />
+        <StatCard label="Valeur composants" value={componentValue.toLocaleString('fr-FR')} sub={sym} color="text-emerald-400" />
         <StatCard label="Alertes stock" value={alerts.length} color={alerts.length > 0 ? 'text-amber-400' : 'text-white/50'} />
         <StatCard label="Ruptures" value={outOfStock.length} color={outOfStock.length > 0 ? 'text-red-400' : 'text-white/50'} />
       </div>
@@ -1020,13 +1199,10 @@ function StockReport({ sym, settings }: { sym: string; settings: PrintReportSett
         <button onClick={() => exportToCSV(['Produit', 'Stock', 'Unité', `Valeur (${sym})`], products.map(p => [p.name, p.stock ?? 0, p.unit, (p.stock ?? 0) * p.cost_price]), 'rapport_stock_produits')} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
           <Download size={12} /> Produits CSV
         </button>
-        <button onClick={() => exportToCSV(['Ingrédient', 'Stock', 'Unité', `Valeur (${sym})`], ingredients.map(i => [i.name, i.stock, i.unit, i.stock * i.cost_per_unit]), 'rapport_stock_ingredients')} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
-          <Download size={12} /> Ingrédients CSV
+        <button onClick={handleExportComponents} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
+          <Download size={12} /> Composants CSV
         </button>
-        <button onClick={() => printReportHtml(buildReportHtml('Rapport Stock — Ingrédients', settings,
-            ['Ingrédient', 'Stock', 'Unité', `Valeur (${sym})`, 'Statut'],
-            ingredients.map(i => [i.name, i.stock.toLocaleString('fr-FR', { maximumFractionDigits: 3 }), i.unit, `${(i.stock * i.cost_per_unit).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} ${sym}`, i.stock <= 0 ? 'RUPTURE' : i.stock <= i.low_stock_threshold && i.low_stock_threshold > 0 ? 'ALERTE' : 'OK'])
-          ))} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
+        <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-xs transition-all">
           <Printer size={12} /> Imprimer
         </button>
       </div>
@@ -1037,37 +1213,114 @@ function StockReport({ sym, settings }: { sym: string; settings: PrintReportSett
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4">
             <h4 className="text-amber-400 font-semibold text-sm mb-2">Alertes stock bas</h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-              {alerts.map(i => (
-                <div key={i.name} className="bg-white/5 rounded-xl px-3 py-2">
-                  <p className="text-white/80 text-xs font-medium truncate">{i.name}</p>
-                  <p className="text-amber-400 text-xs">{i.stock} / {i.low_stock_threshold} {i.unit}</p>
+              {alerts.map(c => (
+                <div key={c.name} className="bg-white/5 rounded-xl px-3 py-2">
+                  <p className="text-white/80 text-xs font-medium truncate">{c.name}</p>
+                  <p className="text-amber-400 text-xs">{c.available} / {c.low_stock_threshold} {c.unit}</p>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Ingredients table */}
+        {/* Components table with per-movement detail */}
         <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
           <div className="px-4 py-3 border-b border-white/8 bg-white/3">
-            <h4 className="text-white/60 text-xs font-semibold">Ingrédients</h4>
+            <h4 className="text-white/60 text-xs font-semibold">Composants</h4>
+          </div>
+          <div className="hidden sm:grid grid-cols-12 px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+            <div className="col-span-3">Composant</div>
+            <div className="col-span-2 text-right">Stock initial</div>
+            <div className="col-span-2 text-right">Entrées</div>
+            <div className="col-span-2 text-right">Sorties</div>
+            <div className="col-span-2 text-right">Stock final</div>
+            <div className="col-span-1 text-right">Valeur</div>
           </div>
           {loading ? (
             Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
-          ) : ingredients.map(i => {
-            const isAlert = i.stock <= i.low_stock_threshold && i.low_stock_threshold > 0;
-            const isOut = i.stock <= 0;
+          ) : components.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <Package size={28} className="text-white/15 mb-2" />
+              <p className="text-white/30 text-sm">Aucun composant à afficher</p>
+            </div>
+          ) : components.map(c => {
+            const isAlert = c.available <= c.low_stock_threshold && c.low_stock_threshold > 0;
+            const isOut = c.available <= 0;
+            const isExpanded = expanded === c.id;
             return (
-              <div key={i.name} className={`flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 transition-colors ${isOut ? 'bg-red-500/5' : isAlert ? 'bg-amber-500/5' : 'hover:bg-white/3'}`}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white text-sm font-medium truncate">{i.name}</p>
+              <div key={c.id} className="transition-colors">
+                <div
+                  className={`grid grid-cols-12 items-center px-4 py-3 border-b border-white/5 cursor-pointer transition-colors ${isOut ? 'bg-red-500/5' : isAlert ? 'bg-amber-500/5' : 'hover:bg-white/3'}`}
+                  onClick={() => setExpanded(isExpanded ? null : c.id)}
+                >
+                  <div className="col-span-12 sm:col-span-3 flex items-center gap-2">
+                    {c.movements.length > 0 && (
+                      <ChevronDown size={12} className={`text-white/30 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    )}
+                    <p className="text-white text-sm font-medium truncate">{c.name}</p>
+                  </div>
+                  <div className="col-span-3 sm:col-span-2 text-right">
+                    <span className="text-xs tabular-nums text-white/50">{c.initial.toLocaleString('fr-FR', { maximumFractionDigits: 3 })}</span>
+                    <span className="text-white/20 text-[10px] ml-1">{c.unit}</span>
+                  </div>
+                  <div className="col-span-3 sm:col-span-2 text-right">
+                    <span className="text-xs tabular-nums text-emerald-400/80">{c.entries > 0 ? '+' : ''}{c.entries.toLocaleString('fr-FR', { maximumFractionDigits: 3 })}</span>
+                  </div>
+                  <div className="col-span-3 sm:col-span-2 text-right">
+                    <span className="text-xs tabular-nums text-red-400/80">{c.outs > 0 ? '-' : ''}{c.outs.toLocaleString('fr-FR', { maximumFractionDigits: 3 })}</span>
+                  </div>
+                  <div className="col-span-3 sm:col-span-2 text-right">
+                    <span className={`text-sm font-semibold tabular-nums ${isOut ? 'text-red-400' : isAlert ? 'text-amber-400' : 'text-white'}`}>
+                      {c.available.toLocaleString('fr-FR', { maximumFractionDigits: 3 })}
+                    </span>
+                  </div>
+                  <div className="col-span-3 sm:col-span-1 text-right">
+                    <span className="text-xs tabular-nums text-blue-400">{(c.available * c.avg_cost).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} {sym}</span>
+                  </div>
                 </div>
-                <div className={`text-sm font-semibold ${isOut ? 'text-red-400' : isAlert ? 'text-amber-400' : 'text-emerald-400'}`}>
-                  {i.stock.toLocaleString('fr-FR', { maximumFractionDigits: 3 })} {i.unit}
-                </div>
-                <div className="w-28 text-right">
-                  <p className="text-blue-400 text-sm">{(i.stock * i.cost_per_unit).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} {sym}</p>
-                </div>
+                <AnimatePresence>
+                  {isExpanded && c.movements.length > 0 && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="border-t border-white/[0.04] p-2 bg-black/10">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-white/30 text-[10px] uppercase">
+                              <th className="text-left py-1.5 px-2 font-medium">Date</th>
+                              <th className="text-left py-1.5 px-2 font-medium">Type</th>
+                              <th className="text-left py-1.5 px-2 font-medium">Origine</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Entrée</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Sortie</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Solde après</th>
+                              <th className="text-left py-1.5 px-2 font-medium">Motif</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {c.movements.map(m => (
+                              <tr key={m.id} className="border-t border-white/[0.03]">
+                                <td className="py-1.5 px-2 text-white/60">
+                                  {new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                  <span className="text-white/30 ml-1">{new Date(m.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                </td>
+                                <td className="py-1.5 px-2 text-white/50">{m.type === 'in' ? 'Entrée' : m.type === 'out' ? 'Sortie' : 'Ajustement'}</td>
+                                <td className="py-1.5 px-2 text-white/40">{m.reference_type === 'sale' ? 'Vente' : m.reference_type === 'purchase_order' ? 'Réception achat' : m.reference_type === 'manual' ? 'Manuel' : m.reference_type === 'adjustment' ? 'Ajustement' : m.reference_type === 'production' ? 'Production' : m.reference_type === 'stock_decrement' ? 'Décrément stock' : m.reference_type === 'order' ? 'Commande' : m.reference_type || '—'}</td>
+                                <td className="py-1.5 px-2 text-right text-emerald-400/70">{m.quantity_in > 0 ? `+${m.quantity_in}` : ''}</td>
+                                <td className="py-1.5 px-2 text-right text-red-400/70">{m.quantity_out > 0 ? `-${m.quantity_out}` : ''}</td>
+                                <td className="py-1.5 px-2 text-right text-white/60">{m.stock_after.toLocaleString('fr-FR', { maximumFractionDigits: 3 })}</td>
+                                <td className="py-1.5 px-2 text-white/40 max-w-[160px] truncate">{m.reason || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             );
           })}
@@ -1128,7 +1381,7 @@ function ProductionReport({ range, sym, settings }: { range: PeriodRange; sym: s
         </button>
         <button onClick={() => printReportHtml(buildReportHtml('Rapport Production', settings,
             ['Produit', 'Qté produite', 'Pertes', `Coût unitaire (${sym})`, `Coût total (${sym})`, 'Statut', 'Date'],
-            prods.map(p => [p.product_name, p.quantity_produced.toLocaleString('fr-FR'), p.loss_quantity.toLocaleString('fr-FR'), `${p.unit_cost.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} ${sym}`, `${p.total_cost.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} ${sym}`, p.status, new Date(p.created_at).toLocaleDateString('fr-FR')])
+            prods.map(p => [p.product_name, p.quantity_produced.toLocaleString('fr-FR'), p.loss_quantity.toLocaleString('fr-FR'), `${p.unit_cost.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} ${sym}`, `${p.total_cost.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} ${sym}`, p.status === 'planned' ? 'Planifiée' : p.status === 'in_progress' ? 'En cours' : p.status === 'completed' ? 'Terminée' : p.status === 'cancelled' ? 'Annulée' : p.status, new Date(p.created_at).toLocaleDateString('fr-FR')])
           ))} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
           <Printer size={12} /> Imprimer
         </button>
@@ -1184,14 +1437,558 @@ function ProductionReport({ range, sym, settings }: { range: PeriodRange; sym: s
 }
 
 // ─────────────────────────────────────────────────────────
+// CASH EXPENSES REPORT
+// ─────────────────────────────────────────────────────────
+interface ExpenseRow {
+  id: string;
+  expense_number: number | null;
+  category: string;
+  description: string;
+  amount: number;
+  payment_method: string;
+  reference: string;
+  recipient: string;
+  created_by: string;
+  expense_date: string;
+  created_at: string;
+}
+
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: 'Espèces',
+  wave: 'Wave',
+  orange_money: 'Orange Money',
+  card: 'Carte',
+  bank_transfer: 'Virement',
+};
+
+function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym: string; settings: PrintReportSettings }) {
+  const { currentSite } = useTenant();
+  const siteId = currentSite?.id ?? null;
+  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('expenses')
+      .select('*')
+      .eq('site_id', siteId)
+      .gte('expense_date', range.from)
+      .lte('expense_date', range.to)
+      .order('expense_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    setExpenses((data ?? []) as ExpenseRow[]);
+    setLoading(false);
+  }, [range, siteId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const totalAmount = expenses.reduce((s, e) => s + e.amount, 0);
+
+  const byCategory = useMemo(() => {
+    const map: Record<string, { category: string; total: number; count: number }> = {};
+    expenses.forEach(e => {
+      const key = e.category || 'Sans catégorie';
+      if (!map[key]) map[key] = { category: key, total: 0, count: 0 };
+      map[key].total += e.amount;
+      map[key].count++;
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  }, [expenses]);
+
+  const rangeLabel = range.from === range.to
+    ? new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    : `Du ${new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} au ${new Date(range.to).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+
+  const handleExport = () => exportToCSV(
+    ['N°', 'Date', 'Catégorie', 'Libellé', 'Bénéficiaire', 'Référence', 'Mode paiement', 'Caissier', `Montant (${sym})`],
+    expenses.map(e => [e.expense_number ?? '', e.expense_date, e.category, e.description, e.recipient, e.reference, PAYMENT_LABELS[e.payment_method] ?? e.payment_method, e.created_by, e.amount]),
+    'depenses_caisse'
+  );
+
+  const handlePrint = () => {
+    const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const docHeader = buildA4Header(settings);
+    const fmtAmount = (n: number) => `${Math.round(n).toLocaleString('fr-FR')}\u00a0${sym}`;
+
+    const catRowsHtml = byCategory.map(c => `
+      <tr>
+        <td>${esc(c.category)}</td>
+        <td class="text-right">${c.count}</td>
+        <td class="text-right">${fmtAmount(c.total)}</td>
+      </tr>
+    `).join('');
+
+    const detailRowsHtml = expenses.map(e => `
+      <tr>
+        <td>${esc(e.expense_date)}</td>
+        <td>${esc(e.expense_number ? `#${e.expense_number}` : '—')}</td>
+        <td>${esc(e.category || '—')}</td>
+        <td>${esc(e.description)}</td>
+        <td>${esc(e.recipient || '—')}</td>
+        <td>${esc(e.created_by || '—')}</td>
+        <td>${esc(PAYMENT_LABELS[e.payment_method] ?? e.payment_method)}</td>
+        <td class="text-right">${fmtAmount(e.amount)}</td>
+      </tr>
+    `).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Dépenses de caisse</title>
+  <style>${A4_CSS_LANDSCAPE}</style>
+</head>
+<body>
+  ${docHeader}
+  <h2>Dépenses de caisse</h2>
+  <p class="subtitle">${esc(rangeLabel)} — édité le ${esc(dateStr)}</p>
+  <hr class="sep">
+  <div class="stat-block">
+    <div class="stat"><span class="stat-val">${fmtAmount(totalAmount)}</span><span class="stat-lbl">Total dépenses</span></div>
+    <div class="stat"><span class="stat-val">${expenses.length}</span><span class="stat-lbl">Écritures</span></div>
+    <div class="stat"><span class="stat-val">${byCategory.length}</span><span class="stat-lbl">Catégories</span></div>
+  </div>
+  <h3>Sous-totaux par catégorie</h3>
+  <table>
+    <colgroup><col style="width:50%;"><col style="width:20%;"><col style="width:30%;"></colgroup>
+    <thead><tr><th>Catégorie</th><th class="text-right">Nombre</th><th class="text-right">Total</th></tr></thead>
+    <tbody>${catRowsHtml || `<tr><td colspan="3" style="text-align:center;color:#555;">Aucune donnée.</td></tr>`}</tbody>
+    <tfoot><tr class="total-row"><td>Total</td><td class="text-right">${expenses.length}</td><td class="text-right">${fmtAmount(totalAmount)}</td></tr></tfoot>
+  </table>
+  <h3 style="margin-top:14px;">Détail des dépenses</h3>
+  <table>
+    <colgroup>
+      <col style="width:10%;"><col style="width:7%;"><col style="width:12%;"><col style="width:18%;">
+      <col style="width:13%;"><col style="width:12%;"><col style="width:10%;"><col style="width:13%;">
+    </colgroup>
+    <thead><tr>
+      <th>Date</th><th>N°</th><th>Catégorie</th><th>Libellé</th>
+      <th>Bénéficiaire</th><th>Caissier</th><th>Mode</th><th class="text-right">Montant</th>
+    </tr></thead>
+    <tbody>${detailRowsHtml || `<tr><td colspan="8" style="text-align:center;color:#555;">Aucune dépense sur cette période.</td></tr>`}</tbody>
+    <tfoot><tr class="total-row"><td colspan="7">Total</td><td class="text-right">${fmtAmount(totalAmount)}</td></tr></tfoot>
+  </table>
+  <div class="doc-footer"><span>${esc(settings.restaurant_name)}</span><span>Dépenses de caisse — ${esc(rangeLabel)}</span></div>
+</body>
+</html>`;
+    printViaIframe(html);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <StatCard label="Total dépenses" value={totalAmount.toLocaleString('fr-FR')} sub={sym} color="text-amber-400" />
+        <StatCard label="Écritures" value={expenses.length} color="text-white" />
+        <StatCard label="Catégories" value={byCategory.length} color="text-blue-400" />
+      </div>
+
+      <div className="flex gap-2 justify-end">
+        <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
+          <Download size={12} /> Exporter CSV
+        </button>
+        <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-xs transition-all">
+          <Printer size={12} /> Imprimer
+        </button>
+      </div>
+
+      {/* Category subtotals */}
+      {byCategory.length > 0 && (
+        <div className="glass-card rounded-2xl border border-white/8 overflow-hidden">
+          <div className="px-4 py-3 border-b border-white/8 bg-white/3">
+            <h3 className="text-white/60 text-xs font-semibold">Sous-totaux par catégorie</h3>
+          </div>
+          <div className="hidden sm:grid grid-cols-12 px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+            <div className="col-span-6">Catégorie</div>
+            <div className="col-span-3 text-right">Nombre</div>
+            <div className="col-span-3 text-right">Total</div>
+          </div>
+          {byCategory.map(c => (
+            <div key={c.category} className="grid grid-cols-12 items-center px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+              <div className="col-span-12 sm:col-span-6"><p className="text-white text-sm font-medium truncate">{c.category}</p></div>
+              <div className="col-span-6 sm:col-span-3 text-right"><span className="text-white/50 text-xs">{c.count}</span></div>
+              <div className="col-span-6 sm:col-span-3 text-right"><span className="text-amber-400 font-semibold text-sm">{c.total.toLocaleString('fr-FR')} {sym}</span></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Detail list */}
+      <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+        <div className="hidden sm:flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
+          <div className="flex-1 text-white/30 text-xs font-medium">Libellé</div>
+          <div className="w-24 text-white/30 text-xs font-medium">Catégorie</div>
+          <div className="hidden md:block w-24 text-white/30 text-xs font-medium">Bénéficiaire</div>
+          <div className="hidden md:block w-20 text-white/30 text-xs font-medium">Mode</div>
+          <div className="w-20 text-white/30 text-xs font-medium text-right">Date</div>
+          <div className="w-24 text-white/30 text-xs font-medium text-right">Montant</div>
+        </div>
+        {loading ? (
+          Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
+        ) : expenses.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <DollarSign size={28} className="text-white/15 mb-2" />
+            <p className="text-white/30 text-sm">Aucune dépense sur cette période</p>
+          </div>
+        ) : expenses.map(e => (
+          <div key={e.id} className="flex items-center gap-3 px-3 sm:px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-xs sm:text-sm truncate">{e.description || '—'}</p>
+              {e.reference && <p className="text-white/30 text-[10px] truncate">Réf: {e.reference}</p>}
+            </div>
+            <div className="hidden sm:block w-24"><span className="text-xs text-white/40">{e.category || '—'}</span></div>
+            <div className="hidden md:block w-24"><span className="text-xs text-white/40 truncate block">{e.recipient || '—'}</span></div>
+            <div className="hidden md:block w-20"><span className="text-xs text-white/40">{PAYMENT_LABELS[e.payment_method] ?? e.payment_method}</span></div>
+            <div className="hidden sm:block w-20 text-right"><span className="text-xs text-white/40">{e.expense_date}</span></div>
+            <div className="w-24 text-right"><span className="text-amber-400 font-semibold text-xs sm:text-sm">{e.amount.toLocaleString('fr-FR')} {sym}</span></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// ACTIVITY BALANCE REPORT
+// ─────────────────────────────────────────────────────────
+interface ActivitySaleRow {
+  id: string;
+  sale_number: number;
+  total: number;
+  discount_amount: number;
+  created_at: string;
+}
+
+interface ActivityPurchaseRow {
+  id: string;
+  order_number: number;
+  supplier_id: string | null;
+  order_date: string;
+  total_amount: number;
+  status: string;
+}
+
+interface ActivityExpenseRow {
+  id: string;
+  category: string;
+  description: string;
+  amount: number;
+  expense_date: string;
+}
+
+function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; sym: string; settings: PrintReportSettings }) {
+  const { currentSite } = useTenant();
+  const siteId = currentSite?.id ?? null;
+  const [sales, setSales] = useState<ActivitySaleRow[]>([]);
+  const [purchases, setPurchases] = useState<ActivityPurchaseRow[]>([]);
+  const [purchaseItems, setPurchaseItems] = useState<{ purchase_order_id: string; total_price: number }[]>([]);
+  const [invoices, setInvoices] = useState<{ id: string; purchase_order_id: string | null; total_amount: number; invoice_date: string; status: string }[]>([]);
+  const [expenses, setExpenses] = useState<ActivityExpenseRow[]>([]);
+  const [suppliers, setSuppliers] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [salesRes, poRes, poiRes, invRes, expRes, supRes] = await Promise.all([
+      supabase.from('sales')
+        .select('id, sale_number, total, discount_amount, created_at, status, cancelled_at')
+        .eq('site_id', siteId)
+        .gte('created_at', range.from + 'T00:00:00')
+        .lte('created_at', range.to + 'T23:59:59')
+        .order('created_at', { ascending: false })
+        .limit(5000),
+      supabase.from('purchase_orders')
+        .select('id, order_number, supplier_id, order_date, total_amount, status')
+        .eq('site_id', siteId)
+        .gte('order_date', range.from)
+        .lte('order_date', range.to)
+        .neq('status', 'draft')
+        .neq('status', 'cancelled')
+        .order('order_date', { ascending: false })
+        .limit(5000),
+      supabase.from('purchase_order_items')
+        .select('purchase_order_id, total_price')
+        .eq('site_id', siteId),
+      supabase.from('supplier_invoices')
+        .select('id, purchase_order_id, total_amount, invoice_date, status')
+        .eq('site_id', siteId)
+        .gte('invoice_date', range.from)
+        .lte('invoice_date', range.to)
+        .neq('status', 'cancelled'),
+      supabase.from('expenses')
+        .select('id, category, description, amount, expense_date')
+        .eq('site_id', siteId)
+        .gte('expense_date', range.from)
+        .lte('expense_date', range.to)
+        .order('expense_date', { ascending: false })
+        .limit(5000),
+      supabase.from('suppliers')
+        .select('id, name')
+        .eq('site_id', siteId),
+    ]);
+
+    // Net sales: paid sales minus cancelled refunds
+    const paidSales = ((salesRes.data ?? []) as { id: string; sale_number: number; total: number; discount_amount: number; created_at: string; status: string; cancelled_at: string | null }[])
+      .filter(s => s.status === 'paid');
+    setSales(paidSales.map(s => ({ id: s.id, sale_number: s.sale_number, total: s.total, discount_amount: s.discount_amount, created_at: s.created_at })));
+
+    setPurchases((poRes.data ?? []) as ActivityPurchaseRow[]);
+    setPurchaseItems((poiRes.data ?? []) as { purchase_order_id: string; total_price: number }[]);
+    setInvoices((invRes.data ?? []) as typeof invoices);
+    setExpenses((expRes.data ?? []) as ActivityExpenseRow[]);
+
+    const supMap: Record<string, string> = {};
+    ((supRes.data ?? []) as { id: string; name: string }[]).forEach(s => { supMap[s.id] = s.name; });
+    setSuppliers(supMap);
+
+    setLoading(false);
+  }, [range, siteId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Net sales = sum of paid sales (already excludes cancelled)
+  const netSales = sales.reduce((s, r) => s + r.total, 0);
+  const totalDiscounts = sales.reduce((s, r) => s + r.discount_amount, 0);
+
+  // Purchases: use purchase_orders total_amount for non-draft/non-cancelled orders.
+  // To avoid double-counting with invoices, we count the purchase order once.
+  const validPurchases = purchases;
+  const totalPurchases = validPurchases.reduce((s, p) => s + p.total_amount, 0);
+
+  // Expenses: all expenses in period. To avoid double-counting with purchases,
+  // we exclude expenses that reference a purchase order (by category match is not reliable,
+  // so we count all expenses as-is — the expense table is separate from purchase orders).
+  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+
+  const activityBalance = netSales - totalPurchases - totalExpenses;
+
+  // Expenses by category
+  const expensesByCategory = useMemo(() => {
+    const map: Record<string, number> = {};
+    expenses.forEach(e => {
+      const key = e.category || 'Sans catégorie';
+      map[key] = (map[key] ?? 0) + e.amount;
+    });
+    return Object.entries(map).map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total);
+  }, [expenses]);
+
+  const rangeLabel = range.from === range.to
+    ? new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    : `Du ${new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} au ${new Date(range.to).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+
+  const handlePrint = () => {
+    const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const docHeader = buildA4Header(settings);
+    const fmtAmount = (n: number) => `${Math.round(n).toLocaleString('fr-FR')}\u00a0${sym}`;
+
+    const salesRowsHtml = sales.slice(0, 200).map(s => `
+      <tr>
+        <td>${esc(String(s.sale_number))}</td>
+        <td>${esc(new Date(s.created_at).toLocaleDateString('fr-FR'))}</td>
+        <td class="text-right">${fmtAmount(s.discount_amount)}</td>
+        <td class="text-right">${fmtAmount(s.total)}</td>
+      </tr>
+    `).join('');
+
+    const purchaseRowsHtml = validPurchases.slice(0, 200).map(p => `
+      <tr>
+        <td>${esc(String(p.order_number))}</td>
+        <td>${esc(p.order_date)}</td>
+        <td>${esc(suppliers[p.supplier_id ?? ''] ?? '—')}</td>
+        <td>${esc(p.status === 'draft' ? 'Brouillon' : p.status === 'ordered' ? 'Commandé' : p.status === 'partial' ? 'Reçu partiel' : p.status === 'received' ? 'Reçu' : p.status === 'cancelled' ? 'Annulé' : p.status)}</td>
+        <td class="text-right">${fmtAmount(p.total_amount)}</td>
+      </tr>
+    `).join('');
+
+    const expenseRowsHtml = expenses.slice(0, 200).map(e => `
+      <tr>
+        <td>${esc(e.expense_date)}</td>
+        <td>${esc(e.category || '—')}</td>
+        <td>${esc(e.description)}</td>
+        <td class="text-right">${fmtAmount(e.amount)}</td>
+      </tr>
+    `).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Bilan d'activité</title>
+  <style>${A4_CSS_LANDSCAPE}</style>
+</head>
+<body>
+  ${docHeader}
+  <h2>Bilan d'activité</h2>
+  <p class="subtitle">${esc(rangeLabel)} — édité le ${esc(dateStr)}</p>
+  <hr class="sep">
+  <div class="stat-block">
+    <div class="stat"><span class="stat-val">${fmtAmount(netSales)}</span><span class="stat-lbl">Ventes nettes</span></div>
+    <div class="stat"><span class="stat-val">${fmtAmount(totalPurchases)}</span><span class="stat-lbl">Achats fournisseurs</span></div>
+    <div class="stat"><span class="stat-val">${fmtAmount(totalExpenses)}</span><span class="stat-lbl">Dépenses</span></div>
+    <div class="stat" style="border-color:${activityBalance >= 0 ? '#1a7f37' : '#cf222e'};"><span class="stat-val" style="color:${activityBalance >= 0 ? '#1a7f37' : '#cf222e'};">${fmtAmount(activityBalance)}</span><span class="stat-lbl">Solde d'activité</span></div>
+  </div>
+  <p style="font-size:9pt;color:#555;margin-bottom:12px;">Le solde d'activité ne tient pas compte des variations de stock.</p>
+
+  <h3>Ventes nettes (${sales.length} tickets)</h3>
+  <table>
+    <colgroup><col style="width:15%;"><col style="width:25%;"><col style="width:25%;"><col style="width:35%;"></colgroup>
+    <thead><tr><th>N°</th><th>Date</th><th class="text-right">Remises</th><th class="text-right">Total</th></tr></thead>
+    <tbody>${salesRowsHtml || `<tr><td colspan="4" style="text-align:center;color:#555;">Aucune vente.</td></tr>`}</tbody>
+    <tfoot><tr class="total-row"><td colspan="3">Total ventes nettes</td><td class="text-right">${fmtAmount(netSales)}</td></tr></tfoot>
+  </table>
+
+  <h3 style="margin-top:14px;">Achats fournisseurs (${validPurchases.length} commandes)</h3>
+  <table>
+    <colgroup><col style="width:15%;"><col style="width:20%;"><col style="width:35%;"><col style="width:15%;"><col style="width:15%;"></colgroup>
+    <thead><tr><th>N°</th><th>Date</th><th>Fournisseur</th><th>Statut</th><th class="text-right">Montant</th></tr></thead>
+    <tbody>${purchaseRowsHtml || `<tr><td colspan="5" style="text-align:center;color:#555;">Aucun achat.</td></tr>`}</tbody>
+    <tfoot><tr class="total-row"><td colspan="4">Total achats</td><td class="text-right">${fmtAmount(totalPurchases)}</td></tr></tfoot>
+  </table>
+
+  <h3 style="margin-top:14px;">Dépenses (${expenses.length} écritures)</h3>
+  <table>
+    <colgroup><col style="width:15%;"><col style="width:20%;"><col style="width:50%;"><col style="width:15%;"></colgroup>
+    <thead><tr><th>Date</th><th>Catégorie</th><th>Libellé</th><th class="text-right">Montant</th></tr></thead>
+    <tbody>${expenseRowsHtml || `<tr><td colspan="4" style="text-align:center;color:#555;">Aucune dépense.</td></tr>`}</tbody>
+    <tfoot><tr class="total-row"><td colspan="3">Total dépenses</td><td class="text-right">${fmtAmount(totalExpenses)}</td></tr></tfoot>
+  </table>
+
+  <h3 style="margin-top:14px;">Récapitulatif</h3>
+  <table>
+    <colgroup><col style="width:70%;"><col style="width:30%;"></colgroup>
+    <tbody>
+      <tr><td>Ventes nettes</td><td class="text-right">${fmtAmount(netSales)}</td></tr>
+      <tr><td>Moins: achats fournisseurs</td><td class="text-right">${fmtAmount(-totalPurchases)}</td></tr>
+      <tr><td>Moins: dépenses</td><td class="text-right">${fmtAmount(-totalExpenses)}</td></tr>
+      <tr class="total-row"><td>Solde d'activité</td><td class="text-right">${fmtAmount(activityBalance)}</td></tr>
+    </tbody>
+  </table>
+
+  <div class="doc-footer"><span>${esc(settings.restaurant_name)}</span><span>Bilan d'activité — ${esc(rangeLabel)}</span></div>
+</body>
+</html>`;
+    printViaIframe(html);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard label="Ventes nettes" value={netSales.toLocaleString('fr-FR')} sub={sym} color="text-emerald-400" />
+        <StatCard label="Achats fournisseurs" value={totalPurchases.toLocaleString('fr-FR')} sub={sym} color="text-amber-400" />
+        <StatCard label="Dépenses" value={totalExpenses.toLocaleString('fr-FR')} sub={sym} color="text-red-400" />
+        <StatCard
+          label="Solde d'activité"
+          value={activityBalance.toLocaleString('fr-FR')}
+          sub={sym}
+          color={activityBalance >= 0 ? 'text-emerald-400' : 'text-red-400'}
+        />
+      </div>
+
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-white/30 text-[11px]">Le solde d'activité ne tient pas compte des variations de stock.</p>
+        <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-xs transition-all">
+          <Printer size={12} /> Imprimer
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <RefreshCw size={24} className="animate-spin text-white/20" />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Sales summary */}
+          <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+              <h3 className="text-white/60 text-xs font-semibold">Ventes nettes ({sales.length} tickets)</h3>
+              <span className="text-emerald-400 font-bold text-sm">{netSales.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            {sales.slice(0, 5).map(s => (
+              <div key={s.id} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
+                <span className="text-white/50 text-xs">#{s.sale_number} · {new Date(s.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>
+                <span className="text-white/70 text-xs">{s.total.toLocaleString('fr-FR')} {sym}</span>
+              </div>
+            ))}
+            {sales.length > 5 && <div className="px-4 py-2 text-white/30 text-[10px] text-center">+ {sales.length - 5} autres — voir impression pour le détail</div>}
+            {sales.length === 0 && <div className="px-4 py-6 text-center text-white/30 text-sm">Aucune vente validée</div>}
+          </div>
+
+          {/* Purchases summary */}
+          <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+              <h3 className="text-white/60 text-xs font-semibold">Achats fournisseurs ({validPurchases.length} commandes)</h3>
+              <span className="text-amber-400 font-bold text-sm">{totalPurchases.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            {validPurchases.slice(0, 5).map(p => (
+              <div key={p.id} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
+                <span className="text-white/50 text-xs">BC-{String(p.order_number).padStart(4, '0')} · {suppliers[p.supplier_id ?? ''] ?? '—'} · {p.order_date}</span>
+                <span className="text-white/70 text-xs">{p.total_amount.toLocaleString('fr-FR')} {sym}</span>
+              </div>
+            ))}
+            {validPurchases.length > 5 && <div className="px-4 py-2 text-white/30 text-[10px] text-center">+ {validPurchases.length - 5} autres</div>}
+            {validPurchases.length === 0 && <div className="px-4 py-6 text-center text-white/30 text-sm">Aucun achat validé</div>}
+          </div>
+
+          {/* Expenses summary */}
+          <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+              <h3 className="text-white/60 text-xs font-semibold">Dépenses ({expenses.length} écritures)</h3>
+              <span className="text-red-400 font-bold text-sm">{totalExpenses.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            {expensesByCategory.map(c => (
+              <div key={c.category} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
+                <span className="text-white/50 text-xs">{c.category}</span>
+                <span className="text-white/70 text-xs">{c.total.toLocaleString('fr-FR')} {sym}</span>
+              </div>
+            ))}
+            {expenses.length === 0 && <div className="px-4 py-6 text-center text-white/30 text-sm">Aucune dépense</div>}
+          </div>
+
+          {/* Balance recap */}
+          <div className="glass-card rounded-2xl border border-white/8 p-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-white/60 text-sm">Ventes nettes</span>
+                <span className="text-emerald-400 font-semibold text-sm">{netSales.toLocaleString('fr-FR')} {sym}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-white/60 text-sm">Moins: achats fournisseurs</span>
+                <span className="text-amber-400 text-sm">-{totalPurchases.toLocaleString('fr-FR')} {sym}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-white/60 text-sm">Moins: dépenses</span>
+                <span className="text-red-400 text-sm">-{totalExpenses.toLocaleString('fr-FR')} {sym}</span>
+              </div>
+              <div className="border-t border-white/10 pt-2 mt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-white font-bold text-base">Solde d'activité</span>
+                  <span className={`font-black text-lg ${activityBalance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {activityBalance.toLocaleString('fr-FR')} {sym}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────
 const tabs: { id: ReportTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
-  { id: 'sales',      label: 'Ventes',      icon: BarChart3 },
-  { id: 'products',   label: 'Produits',    icon: ShoppingBag },
-  { id: 'drivers',    label: 'Livreurs',    icon: Truck },
-  { id: 'stock',      label: 'Stock',       icon: Package },
-  { id: 'production', label: 'Production',  icon: FlaskConical },
+  { id: 'sales',         label: 'Ventes',            icon: BarChart3 },
+  { id: 'products',      label: 'Produits',          icon: ShoppingBag },
+  { id: 'drivers',       label: 'Livreurs',          icon: Truck },
+  { id: 'stock',         label: 'Stock',             icon: Package },
+  { id: 'production',    label: 'Production',        icon: FlaskConical },
+  { id: 'cash-expenses', label: 'Dépenses caisse',   icon: DollarSign },
+  { id: 'activity',      label: "Bilan d'activité",  icon: FileText },
 ];
 
 export function ReportsPage() {
@@ -1308,11 +2105,13 @@ export function ReportsPage() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
-            {tab === 'sales'      && <SalesReport      key={refreshKey} range={range} sym={sym} settings={settings} />}
-            {tab === 'products'   && <ProductsReport   key={refreshKey} range={range} sym={sym} settings={settings} />}
-            {tab === 'drivers'    && <DriversReport    key={refreshKey} range={range} sym={sym} settings={settings} />}
-            {tab === 'stock'      && <StockReport      sym={sym} settings={settings} />}
-            {tab === 'production' && <ProductionReport key={refreshKey} range={range} sym={sym} settings={settings} />}
+            {tab === 'sales'         && <SalesReport         key={refreshKey} range={range} sym={sym} settings={settings} />}
+            {tab === 'products'      && <ProductsReport      key={refreshKey} range={range} sym={sym} settings={settings} />}
+            {tab === 'drivers'       && <DriversReport       key={refreshKey} range={range} sym={sym} settings={settings} />}
+            {tab === 'stock'         && <StockReport         key={refreshKey} range={range} sym={sym} settings={settings} />}
+            {tab === 'production'    && <ProductionReport    key={refreshKey} range={range} sym={sym} settings={settings} />}
+            {tab === 'cash-expenses' && <CashExpensesReport  key={refreshKey} range={range} sym={sym} settings={settings} />}
+            {tab === 'activity'      && <ActivityBalanceReport key={refreshKey} range={range} sym={sym} settings={settings} />}
           </motion.div>
         </AnimatePresence>
       </div>

@@ -5,6 +5,7 @@ import { AlertCircle, ChevronDown, X, Utensils, Check, CupSoda } from 'lucide-re
 import type { Product, ProductVariant, Sauce, SelectedSauce, Flavor, SelectedFlavor, Category } from '../../types/database';
 import { usePOS } from '../../context/POSContext';
 import { useSettings } from '../../context/SettingsContext';
+import type { ComponentAvailabilityResult } from '../../context/POSContext';
 
 interface VariantModalProps {
   product: Product;
@@ -489,7 +490,7 @@ interface ProductCardProps {
 }
 
 function ProductCard({ product, categories, allProducts }: ProductCardProps) {
-  const { addToCart, sauces: allSauces, flavors: allFlavors } = usePOS();
+  const { addToCart, sauces: allSauces, flavors: allFlavors, checkProductAvailability } = usePOS();
   const category = categories.find(c => c.id === product.category_id);
   const { settings } = useSettings();
   const [showVariants, setShowVariants] = useState(false);
@@ -503,6 +504,10 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
   const hasVariants = (product.variants as ProductVariant[]).length > 0;
   const needsSauce = settings.sauces_enabled && Boolean(category?.requires_sauce);
   const needsFlavor = settings.flavors_enabled && Boolean(category?.requires_flavor);
+
+  // Component stock availability check
+  const availability: ComponentAvailabilityResult = checkProductAvailability(product.id, 1);
+  const componentBlocked = !availability.available;
 
   const drinkCategoryIds = new Set(
     categories.filter(c => /boisson/i.test(c.name)).map(c => c.id)
@@ -612,7 +617,7 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
     setTimeout(() => setAdded(false), 600);
   }
 
-  const unavailable = product.track_stock && !product.is_available;
+  const unavailable = (product.track_stock && !product.is_available) || componentBlocked;
 
   return (
     <>
@@ -682,8 +687,12 @@ function ProductCard({ product, categories, allProducts }: ProductCardProps) {
         )}
         {unavailable && (
           <div className="absolute inset-0 bg-gray-950/70 flex items-center justify-center">
-            <span className="text-white/60 text-[9px] font-medium px-1.5 py-0.5 bg-gray-900/80 rounded-md flex items-center gap-0.5">
-              <AlertCircle size={9} /> Indisponible
+            <span className="text-white/60 text-[9px] font-medium px-1.5 py-0.5 bg-gray-900/80 rounded-md flex items-center gap-0.5 text-center">
+              {componentBlocked ? (
+                <>Stock insuffisant{availability.componentName ? `: ${availability.componentName}` : ''}</>
+              ) : (
+                <><AlertCircle size={9} /> Indisponible</>
+              )}
             </span>
           </div>
         )}

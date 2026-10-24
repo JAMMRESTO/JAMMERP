@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Users, Clock, CheckCircle2, XCircle,
   Edit3, Trash2, RefreshCw, ArrowRightLeft, Layers,
-  Coffee, X, Check, AlertTriangle
+  Coffee, X, Check, AlertTriangle, Move
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useTenant } from '../context/TenantContext';
@@ -22,39 +22,79 @@ const statusConfig: Record<TableStatus, { label: string; color: string; bg: stri
 // ─────────────────────────────────────────────────────────
 // Table card (floor plan node)
 // ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// Table dimensions & collision helpers
+// ─────────────────────────────────────────────────────────
+const GRID = 32;
+const FLOOR_W = 760;
+const FLOOR_H = 500;
+
+function tableDims(capacity: number) {
+  const w = capacity <= 2 ? 72 : capacity <= 4 ? 90 : capacity <= 6 ? 110 : 130;
+  const h = capacity <= 2 ? 72 : capacity <= 4 ? 90 : capacity <= 6 ? 80 : 90;
+  return { w, h };
+}
+
+function rectsOverlap(ax: number, ay: number, aw: number, ah: number, bx: number, by: number, bw: number, bh: number) {
+  return !(ax + aw <= bx || bx + bw <= ax || ay + ah <= by || by + bh <= ay);
+}
+
+function findFreeSpot(capacity: number, existing: { pos_x: number; pos_y: number; capacity: number }[]) {
+  const { w, h } = tableDims(capacity);
+  const margin = 8;
+  for (let y = margin; y <= FLOOR_H - h - margin; y += GRID) {
+    for (let x = margin; x <= FLOOR_W - w - margin; x += GRID) {
+      const overlaps = existing.some(t => {
+        const ed = tableDims(t.capacity);
+        return rectsOverlap(x, y, w, h, t.pos_x, t.pos_y, ed.w, ed.h);
+      });
+      if (!overlaps) return { x, y };
+    }
+  }
+  return { x: margin, y: margin };
+}
+
+// ─────────────────────────────────────────────────────────
+// Table card (draggable floor plan node)
+// ─────────────────────────────────────────────────────────
 interface TableCardProps {
   table: RestaurantTable;
   selected: boolean;
+  dragging: boolean;
   onClick: () => void;
+  onDragStart: (e: React.PointerEvent) => void;
 }
 
-function TableCard({ table, selected, onClick }: TableCardProps) {
+function TableCard({ table, selected, dragging, onClick, onDragStart }: TableCardProps) {
   const cfg = statusConfig[table.status];
   const isRound = table.shape === 'round';
+  const { w, h } = tableDims(table.capacity);
 
   return (
     <motion.button
-      layout
-      whileHover={{ scale: 1.04 }}
-      whileTap={{ scale: 0.97 }}
+      layout={!dragging}
+      whileHover={dragging ? undefined : { scale: 1.04 }}
+      whileTap={dragging ? undefined : { scale: 0.97 }}
       onClick={onClick}
-      className={`absolute flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all select-none
+      onPointerDown={onDragStart}
+      className={`absolute flex flex-col items-center justify-center gap-0.5 cursor-grab active:cursor-grabbing transition-[opacity,border-color,box-shadow] select-none touch-none
         ${isRound ? 'rounded-full' : 'rounded-2xl'}
-        ${selected ? 'ring-2 ring-white/60 ring-offset-1 ring-offset-transparent z-10' : ''}
+        ${selected && !dragging ? 'ring-2 ring-white/60 ring-offset-1 ring-offset-transparent z-10' : ''}
+        ${dragging ? 'opacity-50 ring-2 ring-white/40 z-20' : ''}
         border ${cfg.border} ${cfg.bg} shadow-lg`}
       style={{
         left: table.pos_x,
         top: table.pos_y,
-        width: table.capacity <= 2 ? 72 : table.capacity <= 4 ? 90 : table.capacity <= 6 ? 110 : 130,
-        height: table.capacity <= 2 ? 72 : table.capacity <= 4 ? 90 : table.capacity <= 6 ? 80 : 90,
+        width: w,
+        height: h,
       }}
     >
-      <span className="text-white font-bold text-xs">{table.name}</span>
-      <div className="flex items-center gap-1">
+      <span className="text-white font-bold text-xs pointer-events-none">{table.name}</span>
+      <div className="flex items-center gap-1 pointer-events-none">
         <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cfg.dot }} />
         <span className={`text-[10px] ${cfg.color}`}>{cfg.label}</span>
       </div>
-      <span className="text-white/30 text-[9px]">{table.capacity} pers.</span>
+      <span className="text-white/30 text-[9px] pointer-events-none">{table.capacity} pers.</span>
     </motion.button>
   );
 }
@@ -89,8 +129,10 @@ function TableForm({ table, floor, onSave, onClose }: TableFormProps) {
       const { error } = await supabase.from('restaurant_tables').update({ ...form, pos_x: table.pos_x, pos_y: table.pos_y }).eq('id', table.id).eq('site_id', siteId);
       if (error) { toast('error', 'Erreur lors de la sauvegarde'); setSaving(false); return; }
     } else {
+      const existingRes = await supabase.from('restaurant_tables').select('pos_x, pos_y, capacity').eq('site_id', siteId).eq('is_active', true).eq('floor', form.floor);
+      const spot = findFreeSpot(form.capacity, (existingRes.data ?? []) as { pos_x: number; pos_y: number; capacity: number }[]);
       const { error } = await supabase.from('restaurant_tables').insert({
-        ...form, pos_x: 80 + Math.floor(Math.random() * 400), pos_y: 80 + Math.floor(Math.random() * 200), status: 'free', site_id: siteId,
+        ...form, pos_x: spot.x, pos_y: spot.y, status: 'free', site_id: siteId,
       });
       if (error) { toast('error', 'Erreur lors de la création'); setSaving(false); return; }
     }
@@ -510,6 +552,8 @@ export function TablesPage() {
   const [editingTable, setEditingTable] = useState<RestaurantTable | null>(null);
   const [showReserve, setShowReserve] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const dragData = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
 
   const load = useCallback(async () => {
     const [tRes, oRes] = await Promise.all([
@@ -522,6 +566,57 @@ export function TablesPage() {
   }, [siteId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleDragStart = useCallback((e: React.PointerEvent, table: RestaurantTable) => {
+    e.preventDefault();
+    setDragId(table.id);
+    dragData.current = { startX: e.clientX, startY: e.clientY, origX: table.pos_x, origY: table.pos_y };
+  }, []);
+
+  useEffect(() => {
+    if (!dragId) return;
+    const handleMove = (e: PointerEvent) => {
+      if (!dragData.current) return;
+      const dx = e.clientX - dragData.current.startX;
+      const dy = e.clientY - dragData.current.startY;
+      let nx = dragData.current.origX + dx;
+      let ny = dragData.current.origY + dy;
+      nx = Math.round(nx / GRID) * GRID;
+      ny = Math.round(ny / GRID) * GRID;
+      const tbl = tables.find(t => t.id === dragId);
+      if (!tbl) return;
+      const { w, h } = tableDims(tbl.capacity);
+      nx = Math.max(4, Math.min(nx, FLOOR_W - w - 4));
+      ny = Math.max(4, Math.min(ny, FLOOR_H - h - 4));
+      setTables(prev => prev.map(t => t.id === dragId ? { ...t, pos_x: nx, pos_y: ny } : t));
+    };
+    const handleUp = async () => {
+      const id = dragId;
+      setDragId(null);
+      dragData.current = null;
+      if (!id) return;
+      const tbl = tables.find(t => t.id === id);
+      if (!tbl) return;
+      const { w, h } = tableDims(tbl.capacity);
+      const others = tables.filter(t => t.id !== id && t.floor === tbl.floor);
+      const overlaps = others.some(t => {
+        const ed = tableDims(t.capacity);
+        return rectsOverlap(tbl.pos_x, tbl.pos_y, w, h, t.pos_x, t.pos_y, ed.w, ed.h);
+      });
+      if (overlaps) {
+        toast('error', 'Superposition interdite');
+        load();
+        return;
+      }
+      await supabase.from('restaurant_tables').update({ pos_x: tbl.pos_x, pos_y: tbl.pos_y }).eq('id', id).eq('site_id', siteId);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+  }, [dragId, tables, siteId, load, toast]);
 
   const floors = [...new Set(tables.map(t => t.floor))].sort();
   const floorTables = tables.filter(t => t.floor === activeFloor);
@@ -623,13 +718,20 @@ export function TablesPage() {
               ))}
             </div>
 
+            {/* Drag hint */}
+            <div className="absolute bottom-4 left-4 flex items-center gap-1.5 text-white/20 text-[10px] z-10">
+              <Move size={11} /> Glisser pour agencer
+            </div>
+
             {/* Tables */}
             {floorTables.map(t => (
               <TableCard
                 key={t.id}
                 table={t}
                 selected={selectedTable?.id === t.id}
+                dragging={dragId === t.id}
                 onClick={() => setSelectedTable(liveSelected?.id === t.id ? null : t)}
+                onDragStart={(e) => handleDragStart(e, t)}
               />
             ))}
 

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Pencil, Trash2, AlertTriangle,
   CheckCircle2, XCircle, Filter, Package,
-  ChevronDown, X, Download, Upload, FileSpreadsheet
+  ChevronDown, X, Download, Upload, FileSpreadsheet, Archive, RotateCcw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../lib/supabase';
@@ -47,9 +47,10 @@ interface ProductRowProps {
   onEdit: (p: Product) => void;
   onDelete: (product: Product) => void;
   onToggleAvailable: (p: Product) => void;
+  onRestore: (p: Product) => void;
 }
 
-function ProductRow({ product, category, onEdit, onDelete, onToggleAvailable }: ProductRowProps) {
+function ProductRow({ product, category, onEdit, onDelete, onToggleAvailable, onRestore }: ProductRowProps) {
   const { settings } = useSettings();
   const sym = settings.currency_symbol;
   const margin = product.price > 0
@@ -79,8 +80,11 @@ function ProductRow({ product, category, onEdit, onDelete, onToggleAvailable }: 
       {/* Name + code */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <p className="text-white font-medium text-xs sm:text-sm truncate">{product.name}</p>
-          {!product.is_available && (
+          <p className={`font-medium text-xs sm:text-sm truncate ${product.is_archived ? 'text-white/40 line-through' : 'text-white'}`}>{product.name}</p>
+          {product.is_archived && (
+            <span className="text-[9px] sm:text-[10px] text-amber-400/80 bg-amber-500/10 px-1 sm:px-1.5 py-0.5 rounded-md flex-shrink-0">Archivé</span>
+          )}
+          {!product.is_available && !product.is_archived && (
             <span className="text-[9px] sm:text-[10px] text-red-400/70 bg-red-500/10 px-1 sm:px-1.5 py-0.5 rounded-md flex-shrink-0">Indispo</span>
           )}
         </div>
@@ -115,29 +119,43 @@ function ProductRow({ product, category, onEdit, onDelete, onToggleAvailable }: 
 
       {/* Actions */}
       <div className="flex items-center gap-0.5 sm:gap-1 opacity-0 group-hover:opacity-100 sm:opacity-100 transition-opacity flex-shrink-0">
-        <button
-          onClick={() => onToggleAvailable(product)}
-          className={`w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center transition-all
-            ${product.is_available ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-white/30 hover:bg-white/10'}`}
-          title={product.is_available ? 'Rendre indisponible' : 'Rendre disponible'}
-        >
-          <CheckCircle2 size={11} className="sm:hidden" />
-          <CheckCircle2 size={13} className="hidden sm:block" />
-        </button>
-        <button
-          onClick={() => onEdit(product)}
-          className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center text-white/40 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
-        >
-          <Pencil size={11} className="sm:hidden" />
-          <Pencil size={13} className="hidden sm:block" />
-        </button>
-        <button
-          onClick={() => onDelete(product)}
-          className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all"
-        >
-          <Trash2 size={11} className="sm:hidden" />
-          <Trash2 size={13} className="hidden sm:block" />
-        </button>
+        {product.is_archived ? (
+          <button
+            onClick={() => onRestore(product)}
+            className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center text-amber-400 hover:bg-amber-500/10 transition-all"
+            title="Restaurer"
+          >
+            <RotateCcw size={11} className="sm:hidden" />
+            <RotateCcw size={13} className="hidden sm:block" />
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={() => onToggleAvailable(product)}
+              className={`w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center transition-all
+                ${product.is_available ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-white/30 hover:bg-white/10'}`}
+              title={product.is_available ? 'Rendre indisponible' : 'Rendre disponible'}
+            >
+              <CheckCircle2 size={11} className="sm:hidden" />
+              <CheckCircle2 size={13} className="hidden sm:block" />
+            </button>
+            <button
+              onClick={() => onEdit(product)}
+              className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center text-white/40 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+            >
+              <Pencil size={11} className="sm:hidden" />
+              <Pencil size={13} className="hidden sm:block" />
+            </button>
+            <button
+              onClick={() => onDelete(product)}
+              className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg flex items-center justify-center text-white/40 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+              title="Archiver"
+            >
+              <Archive size={11} className="sm:hidden" />
+              <Archive size={13} className="hidden sm:block" />
+            </button>
+          </>
+        )}
       </div>
     </motion.div>
   );
@@ -163,11 +181,13 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
   const [importPreview, setImportPreview] = useState<Array<Record<string, string>>>([]);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const catMap = new Map(categories.map(c => [c.id, c]));
 
   const filtered = products.filter(p => {
+    if (!showArchived && p.is_archived) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!p.name.toLowerCase().includes(q) && !p.product_code.toLowerCase().includes(q)) return false;
@@ -184,9 +204,9 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
 
   async function confirmDelete() {
     if (!deleteTarget) return;
-    const { error } = await supabase.from('products').delete().eq('id', deleteTarget.id);
-    if (error) { toast('error', 'Impossible de supprimer ce produit'); return; }
-    toast('success', `${deleteTarget.name} supprimé`);
+    const { error } = await supabase.from('products').update({ is_archived: true, is_available: false }).eq('id', deleteTarget.id);
+    if (error) { toast('error', 'Impossible d\'archiver ce produit'); return; }
+    toast('success', `${deleteTarget.name} archivé`);
     setDeleteTarget(null);
     onRefresh();
   }
@@ -194,6 +214,13 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
   async function handleToggleAvailable(product: Product) {
     const { error } = await supabase.from('products').update({ is_available: !product.is_available }).eq('id', product.id);
     if (error) { toast('error', 'Erreur'); return; }
+    onRefresh();
+  }
+
+  async function handleRestore(product: Product) {
+    const { error } = await supabase.from('products').update({ is_archived: false, is_available: true }).eq('id', product.id);
+    if (error) { toast('error', 'Erreur lors de la restauration'); return; }
+    toast('success', `${product.name} restauré`);
     onRefresh();
   }
 
@@ -436,6 +463,15 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
         </button>
         <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFileSelect} className="hidden" />
         <button
+          onClick={() => setShowArchived(s => !s)}
+          className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-xl border text-xs sm:text-sm transition-all ${showArchived ? 'bg-amber-600/20 border-amber-500/30 text-amber-400' : 'bg-white/5 border-white/10 text-white/50 hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/10'}`}
+          title="Afficher les produits archivés"
+        >
+          <Archive size={12} className="sm:hidden" />
+          <Archive size={14} className="hidden sm:block" />
+          <span className="hidden sm:inline">{showArchived ? 'Archivés' : 'Voir archivés'}</span>
+        </button>
+        <button
           onClick={onNew}
           className="flex items-center gap-1 sm:gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-medium shadow-lg shadow-blue-600/25 transition-all"
         >
@@ -549,6 +585,7 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
                 onEdit={onEdit}
                 onDelete={(p) => setDeleteTarget(p)}
                 onToggleAvailable={handleToggleAvailable}
+                onRestore={handleRestore}
               />
             ))}
           </AnimatePresence>
@@ -676,12 +713,12 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
                     <Trash2 size={18} className="text-red-400" />
                   </div>
                   <div>
-                    <p className="text-white font-semibold text-sm">Supprimer ce produit ?</p>
-                    <p className="text-white/40 text-xs mt-0.5">Cette action est irréversible.</p>
+                    <p className="text-white font-semibold text-sm">Archiver ce produit ?</p>
+                    <p className="text-white/40 text-xs mt-0.5">Le produit sera masqué des ventes mais conservé dans l'historique.</p>
                   </div>
                 </div>
                 <p className="text-white/60 text-sm mb-4">
-                  Êtes-vous sûr de vouloir supprimer <span className="text-white font-medium">{deleteTarget.name}</span> ? Il sera retiré de la liste des produits et ne pourra plus être vendu.
+                  <span className="text-white font-medium">{deleteTarget.name}</span> sera archivé. Il ne sera plus proposé à la vente mais restera visible dans les rapports et historiques. Vous pourrez le restaurer à tout moment.
                 </p>
                 <div className="flex items-center gap-2">
                   <button
@@ -692,9 +729,9 @@ export function ProductList({ products, categories, onEdit, onNew, onRefresh }: 
                   </button>
                   <button
                     onClick={confirmDelete}
-                    className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium shadow-lg shadow-red-600/25 transition-all"
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium shadow-lg shadow-amber-600/25 transition-all"
                   >
-                    Supprimer
+                    Archiver
                   </button>
                 </div>
               </div>

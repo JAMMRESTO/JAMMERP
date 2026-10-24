@@ -73,16 +73,47 @@ export interface ConnectResult {
   error?: string;
 }
 
+export type PrinterRole = 'cash' | 'kitchen';
+
+interface PrinterConnection {
+  device: USBDevice | null;
+  endpoint: number;
+  iface: number;
+  busy: boolean;
+  queue: Uint8Array[];
+}
+
+function createConnection(): PrinterConnection {
+  return { device: null, endpoint: 1, iface: 0, busy: false, queue: [] };
+}
+
+const connections: Record<PrinterRole, PrinterConnection> = {
+  cash: createConnection(),
+  kitchen: createConnection(),
+};
+
+// Legacy single-connection state — kept for backward compat when dual mode is off.
+// Maps to the 'cash' connection.
 let connectedDevice: USBDevice | null = null;
 let connectedEndpoint: number = 1;
 let connectedInterface: number = 0;
+
+function syncLegacyFromCash() {
+  connectedDevice = connections.cash.device;
+  connectedEndpoint = connections.cash.endpoint;
+  connectedInterface = connections.cash.iface;
+}
 
 export function isWebUSBSupported(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator;
 }
 
 export function isPrinterConnected(): boolean {
-  return connectedDevice !== null;
+  return connections.cash.device !== null;
+}
+
+export function isPrinterConnectedRole(role: PrinterRole): boolean {
+  return connections[role].device !== null;
 }
 
 function classifyError(err: unknown): string {
@@ -93,11 +124,47 @@ function classifyError(err: unknown): string {
   return msg || 'Erreur inconnue';
 }
 
+// ── Device identity for per-station persistence ──
+
+export interface PrinterDeviceId {
+  vendorId: number;
+  productId: number;
+  serialNumber: string;
+}
+
+export function getDeviceId(device: USBDevice): PrinterDeviceId {
+  return {
+    vendorId: device.vendorId,
+    productId: device.productId,
+    serialNumber: device.serialNumber ?? '',
+  };
+}
+
+function deviceIdKey(id: PrinterDeviceId): string {
+  return `${id.vendorId}:${id.productId}:${id.serialNumber}`;
+}
+
+function findDeviceById(id: PrinterDeviceId): USBDevice | null {
+  // Synchronous check against already-granted devices
+  // navigator.usb.getDevices is async, so this is a best-effort filter
+  return null;
+}
+
 export async function requestPrinter(): Promise<ConnectResult> {
   if (!isWebUSBSupported()) return { ok: false, error: 'WebUSB non supporté par ce navigateur' };
   try {
     const device = await navigator.usb.requestDevice({ filters: [] });
-    return await openDevice(device);
+    return await openDevice(device, 'cash');
+  } catch (err) {
+    return { ok: false, error: classifyError(err) };
+  }
+}
+
+export async function requestPrinterForRole(role: PrinterRole): Promise<ConnectResult> {
+  if (!isWebUSBSupported()) return { ok: false, error: 'WebUSB non supporté par ce navigateur' };
+  try {
+    const device = await navigator.usb.requestDevice({ filters: [] });
+    return await openDevice(device, role);
   } catch (err) {
     return { ok: false, error: classifyError(err) };
   }
@@ -108,7 +175,7 @@ export async function reconnectPrinter(): Promise<boolean> {
   try {
     const devices = await navigator.usb.getDevices();
     for (const device of devices) {
-      const r = await openDevice(device);
+      const r = await openDevice(device, 'cash');
       if (r.ok) return true;
     }
   } catch {
@@ -117,8 +184,35 @@ export async function reconnectPrinter(): Promise<boolean> {
   return false;
 }
 
-async function openDevice(device: USBDevice): Promise<ConnectResult> {
+export async function reconnectPrinterForRole(role: PrinterRole, deviceId?: PrinterDeviceId): Promise<boolean> {
+  if (!isWebUSBSupported()) return false;
   try {
+    const devices = await navigator.usb.getDevices();
+    for (const device of devices) {
+      // If we have a stored device ID, only reconnect the matching device
+      if (deviceId) {
+        const id = getDeviceId(device);
+        if (id.vendorId !== deviceId.vendorId || id.productId !== deviceId.productId) continue;
+        // If serial numbers are available and differ, skip
+        if (id.serialNumber && deviceId.serialNumber && id.serialNumber !== deviceId.serialNumber) continue;
+      }
+      const r = await openDevice(device, role);
+      if (r.ok) return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+async function openDevice(device: USBDevice, role: PrinterRole): Promise<ConnectResult> {
+  try {
+    // Check if this device is already in use by the other role
+    const otherRole: PrinterRole = role === 'cash' ? 'kitchen' : 'cash';
+    if (connections[otherRole].device === device) {
+      return { ok: false, error: 'Ce périphérique est déjà assigné à l\'autre imprimante. Sélectionnez un périphérique différent.' };
+    }
+
     if (!device.opened) await device.open();
 
     // Try every configuration the device exposes
@@ -135,9 +229,11 @@ async function openDevice(device: USBDevice): Promise<ConnectResult> {
           if (!outEp) continue;
           try {
             await device.claimInterface(iface.interfaceNumber);
-            connectedInterface = iface.interfaceNumber;
-            connectedEndpoint = outEp.endpointNumber;
-            connectedDevice = device;
+            const conn = connections[role];
+            conn.iface = iface.interfaceNumber;
+            conn.endpoint = outEp.endpointNumber;
+            conn.device = device;
+            if (role === 'cash') syncLegacyFromCash();
             return { ok: true };
           } catch {
             // interface may be claimed by another driver — try the next
@@ -152,33 +248,46 @@ async function openDevice(device: USBDevice): Promise<ConnectResult> {
 }
 
 export async function disconnectPrinter(): Promise<void> {
-  if (connectedDevice) {
+  await disconnectPrinterForRole('cash');
+}
+
+export async function disconnectPrinterForRole(role: PrinterRole): Promise<void> {
+  const conn = connections[role];
+  if (conn.device) {
     try {
-      await connectedDevice.releaseInterface(connectedInterface);
+      await conn.device.releaseInterface(conn.iface);
     } catch { /* ignore */ }
     try {
-      await connectedDevice.close();
+      await conn.device.close();
     } catch { /* ignore */ }
-    connectedDevice = null;
+    conn.device = null;
+    if (role === 'cash') syncLegacyFromCash();
   }
 }
 
 async function sendBytes(data: Uint8Array): Promise<boolean> {
-  if (!connectedDevice) {
-    const reconnected = await reconnectPrinter();
+  return sendBytesForRole('cash', data);
+}
+
+async function sendBytesForRole(role: PrinterRole, data: Uint8Array): Promise<boolean> {
+  const conn = connections[role];
+  if (!conn.device) {
+    const reconnected = await reconnectPrinterForRole(role);
     if (!reconnected) return false;
   }
-  if (!connectedDevice) return false;
+  const c = connections[role];
+  if (!c.device) return false;
   try {
-    const result = await connectedDevice.transferOut(connectedEndpoint, data);
+    const result = await c.device.transferOut(c.endpoint, data);
     if (result.status !== 'ok') {
-      console.warn('[escpos] transferOut status:', result.status);
+      console.warn(`[escpos] transferOut (${role}) status:`, result.status);
       return false;
     }
     return true;
   } catch (err) {
-    console.warn('[escpos] transferOut failed:', err);
-    connectedDevice = null;
+    console.warn(`[escpos] transferOut (${role}) failed:`, err);
+    c.device = null;
+    if (role === 'cash') syncLegacyFromCash();
     return false;
   }
 }
@@ -190,12 +299,17 @@ export async function openCashDrawer(): Promise<boolean> {
   const DRAWER_KICK_1 = concat(INIT, new Uint8Array([ESC, 0x70, 0x00, 0x32, 0xff]));
   const DRAWER_KICK_2 = concat(INIT, new Uint8Array([ESC, 0x70, 0x01, 0x32, 0xff]));
 
-  const ok1 = await sendBytes(DRAWER_KICK_1);
+  const ok1 = await sendBytesForRole('cash', DRAWER_KICK_1);
   if (ok1) return true;
-  return sendBytes(DRAWER_KICK_2);
+  return sendBytesForRole('cash', DRAWER_KICK_2);
 }
 
 export async function printTestTicket(restaurantName: string): Promise<boolean> {
+  return printTestTicketForRole('cash', restaurantName);
+}
+
+export async function printTestTicketForRole(role: PrinterRole, restaurantName: string): Promise<boolean> {
+  const label = role === 'cash' ? 'CAISSE' : 'CUISINE';
   const parts: Uint8Array[] = [
     INIT,
     CENTER,
@@ -206,7 +320,7 @@ export async function printTestTicket(restaurantName: string): Promise<boolean> 
     BOLD_OFF,
     LEFT,
     dashedLine(),
-    line('Ticket de test'),
+    line(`Ticket de test - ${label}`),
     line(new Date().toLocaleString('fr-FR')),
     line('Si vous lisez ce texte,'),
     line('l\'imprimante fonctionne.'),
@@ -214,7 +328,7 @@ export async function printTestTicket(restaurantName: string): Promise<boolean> 
     FEED(5),
     CUT,
   ];
-  return sendBytes(concat(...parts));
+  return sendBytesForRole(role, concat(...parts));
 }
 
 // ─── Line / text builders ───
@@ -515,9 +629,18 @@ export async function printBytes(data: Uint8Array): Promise<boolean> {
   return sendBytes(data);
 }
 
+export async function printBytesForRole(role: PrinterRole, data: Uint8Array): Promise<boolean> {
+  return sendBytesForRole(role, data);
+}
+
 export async function printKitchenTicket(data: EscposKitchenData): Promise<boolean> {
   const bytes = buildKitchenTicketBytes(data);
   return sendBytes(bytes);
+}
+
+export async function printKitchenTicketForRole(role: PrinterRole, data: EscposKitchenData): Promise<boolean> {
+  const bytes = buildKitchenTicketBytes(data);
+  return sendBytesForRole(role, bytes);
 }
 
 export async function printReceipt(
@@ -526,6 +649,15 @@ export async function printReceipt(
 ): Promise<boolean> {
   const bytes = buildReceiptBytes(data, settings);
   return sendBytes(bytes);
+}
+
+export async function printReceiptForRole(
+  role: PrinterRole,
+  data: EscposReceiptData,
+  settings: EscposReceiptSettings
+): Promise<boolean> {
+  const bytes = buildReceiptBytes(data, settings);
+  return sendBytesForRole(role, bytes);
 }
 
 export async function printCombined(
@@ -690,7 +822,7 @@ export async function printXReport(
   settings: EscposXReportSettings
 ): Promise<boolean> {
   const bytes = buildXReportBytes(data, settings);
-  return sendBytes(bytes);
+  return sendBytesForRole('cash', bytes);
 }
 
 // ─── Cancelled receipt ticket ───
@@ -735,7 +867,7 @@ export async function printCancelledReceipt(
   settings: EscposReceiptSettings
 ): Promise<boolean> {
   const bytes = buildCancelledReceiptBytes(data, settings);
-  return sendBytes(bytes);
+  return sendBytesForRole('cash', bytes);
 }
 
 // ─── Delivery ticket ───
@@ -834,7 +966,7 @@ export async function printDeliveryTicket(
   settings: EscposDeliverySettings
 ): Promise<boolean> {
   const bytes = buildDeliveryTicketBytes(data, settings);
-  return sendBytes(bytes);
+  return sendBytesForRole('cash', bytes);
 }
 
 // ─── Kitchen ticket items ───
@@ -969,5 +1101,5 @@ export async function printDeferredReceipt(
   settings: EscposReceiptSettings
 ): Promise<boolean> {
   const bytes = buildDeferredReceiptBytes(data, settings);
-  return sendBytes(bytes);
+  return sendBytesForRole('cash', bytes);
 }

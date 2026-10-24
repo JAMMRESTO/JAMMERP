@@ -142,8 +142,10 @@ export interface Product {
   stock: number | null;
   track_stock: boolean;
   is_available: boolean;
+  is_archived: boolean;
   unit: string;
   low_stock_threshold: number;
+  stock_deduction_quantity: number;
   variants: ProductVariant[];
   requires_sauce: boolean;
   sauce_required: boolean;
@@ -155,6 +157,65 @@ export interface Product {
   allowed_flavor_ids: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ProductComponent {
+  id: string;
+  site_id: string | null;
+  name: string;
+  reference: string;
+  unit: string;
+  stock: number;
+  avg_cost: number;
+  low_stock_threshold: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DrinkChoice = 'fixed' | 'choice';
+
+export interface ProductComposition {
+  id: string;
+  site_id: string | null;
+  product_id: string;
+  component_id: string;
+  quantity_per_unit: number;
+  is_drink: boolean;
+  drink_choice: DrinkChoice;
+  component?: Pick<ProductComponent, 'id' | 'name' | 'unit' | 'stock' | 'is_active'> | null;
+  created_at: string;
+}
+
+export type ComponentMovementType = 'in' | 'out' | 'adjustment';
+
+export interface ComponentStockMovement {
+  id: string;
+  site_id: string | null;
+  component_id: string;
+  movement_type: ComponentMovementType;
+  quantity: number;
+  stock_before: number;
+  stock_after: number;
+  reason: string;
+  user_id: string | null;
+  reference_type: string;
+  reference_id: string | null;
+  created_at: string;
+}
+
+export interface ComponentStockMovementWithComponent extends ComponentStockMovement {
+  component: Pick<ProductComponent, 'id' | 'name' | 'unit'> | null;
+}
+
+export interface SaleItemComponentConsumption {
+  id: string;
+  site_id: string | null;
+  sale_item_id: string;
+  component_id: string;
+  component_name: string;
+  quantity_consumed: number;
+  created_at: string;
 }
 
 export interface Sauce {
@@ -256,6 +317,7 @@ export interface SaleItem {
   kitchen_note: string;
   sauces: SelectedSauce[];
   flavors: SelectedFlavor[];
+  stock_consumed: number | null;
   created_at: string;
 }
 
@@ -428,6 +490,7 @@ export interface CartItem {
   sauces: SelectedSauce[];
   flavors: SelectedFlavor[];
   menu_drink?: string | null;
+  drink_component_id?: string | null;
 }
 
 // ============================================================
@@ -458,8 +521,11 @@ export interface RestaurantSettings {
   receipt_footer: string;
   auto_print_receipt: boolean;
   print_kitchen_with_receipt: boolean;
+  dual_printer_mode: boolean;
   sauces_enabled: boolean;
   flavors_enabled: boolean;
+  stock_portion_enabled: boolean;
+  component_stock_enabled: boolean;
   address: string;
   phone: string;
   siret: string;
@@ -708,6 +774,7 @@ export interface PurchaseOrder {
   received_date: string | null;
   total_amount: number;
   notes: string;
+  is_archived: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -723,6 +790,7 @@ export interface PurchaseOrderItem {
   purchase_order_id: string;
   ingredient_id: string | null;
   product_id: string | null;
+  component_id: string | null;
   description: string;
   quantity_ordered: number;
   quantity_received: number;
