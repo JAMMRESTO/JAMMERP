@@ -309,28 +309,52 @@ interface SaleRow {
   created_at: string;
 }
 
+interface SaleItemRow {
+  product_name: string;
+  variant_label: string | null;
+  quantity: number;
+  subtotal: number;
+  sale: { created_at: string; status: string; site_id: string | null } | null;
+  product: { category_id: string | null } | null;
+  category: { name: string } | null;
+}
+
 function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string; settings: PrintReportSettings }) {
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
   const [sales, setSales] = useState<SaleRow[]>([]);
+  const [saleItems, setSaleItems] = useState<SaleItemRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [hideEmptyDays, setHideEmptyDays] = useState(false);
-  const [includeDetail, setIncludeDetail] = useState(true);
+  const [printDetail, setPrintDetail] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+  const [sortBy, setSortBy] = useState<'amount' | 'qty'>('amount');
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('sales')
-      .select('*')
-      .eq('site_id', siteId)
-      .gte('created_at', range.from + 'T00:00:00')
-      .lte('created_at', range.to + 'T23:59:59')
-      .eq('status', 'paid')
-      .order('created_at', { ascending: false })
-      .limit(5000);
-    setSales((data ?? []) as SaleRow[]);
+    const [salesRes, itemsRes] = await Promise.all([
+      supabase
+        .from('sales')
+        .select('*')
+        .eq('site_id', siteId)
+        .gte('created_at', range.from + 'T00:00:00')
+        .lte('created_at', range.to + 'T23:59:59')
+        .eq('status', 'paid')
+        .order('created_at', { ascending: false })
+        .limit(5000),
+      supabase
+        .from('sale_items')
+        .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status, site_id), product:products!inner(category_id), category:categories!inner(name)')
+        .eq('sale.site_id', siteId)
+        .gte('sale.created_at', range.from + 'T00:00:00')
+        .lte('sale.created_at', range.to + 'T23:59:59')
+        .eq('sale.status', 'paid'),
+    ]);
+    setSales((salesRes.data ?? []) as SaleRow[]);
+    setSaleItems((itemsRes.data ?? []) as SaleItemRow[]);
     setSelectedDay(null);
     setLoading(false);
   }, [range, siteId]);
@@ -392,6 +416,37 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
   ].filter(p => p.value > 0);
 
   const displayedSales = selectedDay ? sales.filter(s => s.created_at.slice(0, 10) === selectedDay) : sales;
+
+  // ── Category / product summary from sale_items ──────────────
+  interface ProductAgg { name: string; qty: number; amount: number; }
+  interface CategoryAgg { name: string; qty: number; amount: number; products: ProductAgg[]; }
+
+  const salesByCategory = useMemo<CategoryAgg[]>(() => {
+    const catMap: Record<string, { qty: number; amount: number; products: Record<string, ProductAgg> }> = {};
+    (saleItems as SaleItemRow[]).forEach(item => {
+      const catName = item.category?.name ?? 'Sans catégorie';
+      const prodName = formatItemDisplayName(item.product_name, item.variant_label);
+      if (!catMap[catName]) catMap[catName] = { qty: 0, amount: 0, products: {} };
+      catMap[catName].qty += item.quantity;
+      catMap[catName].amount += item.subtotal;
+      if (!catMap[catName].products[prodName]) catMap[catName].products[prodName] = { name: prodName, qty: 0, amount: 0 };
+      catMap[catName].products[prodName].qty += item.quantity;
+      catMap[catName].products[prodName].amount += item.subtotal;
+    });
+    return Object.entries(catMap).map(([name, v]) => ({
+      name,
+      qty: v.qty,
+      amount: v.amount,
+      products: Object.values(v.products).sort((a, b) =>
+        sortBy === 'qty' ? b.qty - a.qty : b.amount - a.amount
+      ),
+    })).sort((a, b) =>
+      sortBy === 'qty' ? b.qty - a.qty : b.amount - a.amount
+    );
+  }, [saleItems, sortBy]);
+
+  const summaryTotalQty = salesByCategory.reduce((s, c) => s + c.qty, 0);
+  const summaryTotalAmount = salesByCategory.reduce((s, c) => s + c.amount, 0);
 
   const rangeLabel = range.from === range.to
     ? new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -469,6 +524,31 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
     `;
 
     const typeLabel = (t: string) => t === 'dine_in' ? 'Sur place' : t === 'takeaway' ? 'À emporter' : 'Livraison';
+
+    // ── Summary table: category → products ───────────────────────
+    const summaryBodyHtml = salesByCategory.map(cat => {
+      const prodRows = cat.products.map(p => `
+        <tr>
+          <td style="padding-left:18px;">${esc(p.name)}</td>
+          <td class="text-right">${p.qty.toLocaleString('fr-FR')}</td>
+          <td class="text-right">${fmtAmount(p.amount)}</td>
+        </tr>
+      `).join('');
+      return `
+        <tr class="cat-row"><td>${esc(cat.name)}</td><td class="text-right">${cat.qty.toLocaleString('fr-FR')}</td><td class="text-right">${fmtAmount(cat.amount)}</td></tr>
+        ${prodRows}
+      `;
+    }).join('');
+    const summaryTable = `
+      <h3 style="margin-top:14px;">Synthèse par catégorie</h3>
+      <table>
+        <colgroup><col style="width:60%;"><col style="width:15%;"><col style="width:25%;"></colgroup>
+        <thead><tr><th>Produit</th><th class="text-right">Qté</th><th class="text-right">Montant net</th></tr></thead>
+        <tbody>${summaryBodyHtml || `<tr><td colspan="3" style="text-align:center;color:#555;">Aucune donnée.</td></tr>`}</tbody>
+        <tfoot><tr class="total-row"><td>Total</td><td class="text-right">${summaryTotalQty.toLocaleString('fr-FR')}</td><td class="text-right">${fmtAmount(summaryTotalAmount)}</td></tr></tfoot>
+      </table>
+    `;
+
     const detailRowsHtml = sales.slice().reverse().map(s => `
       <tr>
         <td>${esc(String(s.sale_number))}</td>
@@ -482,7 +562,7 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
         <td>${esc(new Date(s.created_at).toLocaleString('fr-FR'))}</td>
       </tr>
     `).join('');
-    const detailBlock = includeDetail && sales.length > 0 ? `
+    const detailBlock = printDetail && sales.length > 0 ? `
       <h3 style="margin-top:14px;">Détail des tickets</h3>
       <table>
         <colgroup>
@@ -516,7 +596,8 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
   <meta charset="utf-8">
   <meta name="color-scheme" content="only light">
   <title>Rapport Ventes</title>
-  <style>${A4_CSS_LANDSCAPE}</style>
+  <style>${A4_CSS}
+.cat-row td{font-weight:700;background:#e8e8f0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.sub-row td{font-weight:600;border-top:1px solid #ccc;}</style>
 </head>
 <body>
   ${docHeader}
@@ -525,6 +606,7 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
   <hr class="sep">
   ${kpisHtml}
   ${dailyTable}
+  ${summaryTable}
   ${detailBlock}
   <div class="doc-footer">
     <span>${esc(settings.restaurant_name)}</span>
@@ -547,6 +629,26 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
       </div>
 
       <div className="flex flex-wrap gap-2 justify-end items-center">
+        <div className="flex gap-1 bg-white/5 p-0.5 rounded-xl border border-white/10">
+          <button
+            onClick={() => setSortBy('amount')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${sortBy === 'amount' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/70'}`}
+          >
+            Montant
+          </button>
+          <button
+            onClick={() => setSortBy('qty')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${sortBy === 'qty' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/70'}`}
+          >
+            Quantité
+          </button>
+        </div>
+        <button
+          onClick={() => setShowDetail(v => !v)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all"
+        >
+          {showDetail ? 'Voir la synthèse' : 'Voir le détail'}
+        </button>
         <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
           <input
             type="checkbox"
@@ -559,8 +661,8 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
         <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
           <input
             type="checkbox"
-            checked={includeDetail}
-            onChange={e => setIncludeDetail(e.target.checked)}
+            checked={printDetail}
+            onChange={e => setPrintDetail(e.target.checked)}
             className="w-3.5 h-3.5 accent-blue-500"
           />
           Inclure le détail à l'impression
@@ -679,44 +781,121 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
       </div>
 
       <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
-        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-b border-white/8 bg-white/3">
-          <div className="w-8 sm:w-10 text-white/30 text-xs font-medium">#</div>
-          <div className="flex-1 text-white/30 text-xs font-medium">
-            {selectedDay ? `Tickets du ${formatDayLabel(selectedDay)}` : 'Client / Table'}
-          </div>
-          <div className="hidden sm:block w-24 text-white/30 text-xs font-medium">Type</div>
-          <div className="hidden md:block w-24 text-white/30 text-xs font-medium text-right">Remise</div>
-          <div className="w-20 sm:w-28 text-white/30 text-xs font-medium text-right">Total</div>
-          <div className="hidden sm:block w-28 text-white/30 text-xs font-medium text-right">Date</div>
-        </div>
-        {loading ? (
-          Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
-        ) : displayedSales.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12">
-            <DollarSign size={28} className="text-white/15 mb-2" />
-            <p className="text-white/30 text-sm">{selectedDay ? 'Aucune vente ce jour' : 'Aucune vente sur cette période'}</p>
-          </div>
-        ) : displayedSales.map(s => (
-          <div key={s.id} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
-            <div className="w-8 sm:w-10 text-white/40 text-[10px] sm:text-xs font-mono">#{s.sale_number}</div>
-            <div className="flex-1 min-w-0">
-              <p className="text-white text-xs sm:text-sm truncate">{s.customer_name || s.table_number || '—'}</p>
+        {showDetail ? (
+          <>
+            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-b border-white/8 bg-white/3">
+              <div className="w-8 sm:w-10 text-white/30 text-xs font-medium">#</div>
+              <div className="flex-1 text-white/30 text-xs font-medium">
+                {selectedDay ? `Tickets du ${formatDayLabel(selectedDay)}` : 'Client / Table'}
+              </div>
+              <div className="hidden sm:block w-24 text-white/30 text-xs font-medium">Type</div>
+              <div className="hidden md:block w-24 text-white/30 text-xs font-medium text-right">Remise</div>
+              <div className="w-20 sm:w-28 text-white/30 text-xs font-medium text-right">Total</div>
+              <div className="hidden sm:block w-28 text-white/30 text-xs font-medium text-right">Date</div>
             </div>
-            <div className="hidden sm:block w-24">
-              <span className="text-xs text-white/40">{s.sale_type === 'dine_in' ? 'Sur place' : s.sale_type === 'takeaway' ? 'Emporter' : 'Livraison'}</span>
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
+            ) : displayedSales.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <DollarSign size={28} className="text-white/15 mb-2" />
+                <p className="text-white/30 text-sm">{selectedDay ? 'Aucune vente ce jour' : 'Aucune vente sur cette période'}</p>
+              </div>
+            ) : displayedSales.map(s => (
+              <div key={s.id} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+                <div className="w-8 sm:w-10 text-white/40 text-[10px] sm:text-xs font-mono">#{s.sale_number}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-xs sm:text-sm truncate">{s.customer_name || s.table_number || '—'}</p>
+                </div>
+                <div className="hidden sm:block w-24">
+                  <span className="text-xs text-white/40">{s.sale_type === 'dine_in' ? 'Sur place' : s.sale_type === 'takeaway' ? 'Emporter' : 'Livraison'}</span>
+                </div>
+                <div className="hidden md:block w-24 text-right">
+                  {s.discount_amount > 0 && <span className="text-amber-400 text-xs">-{s.discount_amount.toLocaleString('fr-FR')} {sym}</span>}
+                </div>
+                <div className="w-20 sm:w-28 text-right">
+                  <p className="text-white font-semibold text-xs sm:text-sm">{s.total.toLocaleString('fr-FR')} {sym}</p>
+                </div>
+                <div className="hidden sm:block w-28 text-right">
+                  <p className="text-white/40 text-xs">{new Date(s.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</p>
+                  <p className="text-white/25 text-[10px]">{new Date(s.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+                </div>
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 border-b border-white/8 bg-white/3">
+              <h3 className="text-white/60 text-xs font-semibold">Synthèse par catégorie</h3>
+              <span className="text-white/40 text-[11px]">{salesByCategory.length} catégories</span>
             </div>
-            <div className="hidden md:block w-24 text-right">
-              {s.discount_amount > 0 && <span className="text-amber-400 text-xs">-{s.discount_amount.toLocaleString('fr-FR')} {sym}</span>}
+            <div className="hidden sm:grid grid-cols-12 px-3 sm:px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+              <div className="col-span-6">Catégorie / Produit</div>
+              <div className="col-span-3 text-right">Qté</div>
+              <div className="col-span-3 text-right">Montant net</div>
             </div>
-            <div className="w-20 sm:w-28 text-right">
-              <p className="text-white font-semibold text-xs sm:text-sm">{s.total.toLocaleString('fr-FR')} {sym}</p>
-            </div>
-            <div className="hidden sm:block w-28 text-right">
-              <p className="text-white/40 text-xs">{new Date(s.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</p>
-              <p className="text-white/25 text-[10px]">{new Date(s.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
-            </div>
-          </div>
-        ))}
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-10 border-b border-white/5 animate-pulse bg-white/2" />)
+            ) : salesByCategory.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <DollarSign size={28} className="text-white/15 mb-2" />
+                <p className="text-white/30 text-sm">Aucune vente sur cette période</p>
+              </div>
+            ) : salesByCategory.map(cat => {
+              const isExpanded = expandedCat === cat.name;
+              return (
+                <div key={cat.name} className="border-b border-white/5 last:border-0">
+                  <button
+                    onClick={() => setExpandedCat(isExpanded ? null : cat.name)}
+                    className="w-full grid grid-cols-12 items-center px-3 sm:px-4 py-3 text-left bg-white/3 hover:bg-white/5 transition-colors"
+                  >
+                    <div className="col-span-12 sm:col-span-6 flex items-center gap-2">
+                      <ChevronDown size={12} className={`text-white/40 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      <p className="text-white text-sm font-semibold truncate">{cat.name}</p>
+                    </div>
+                    <div className="col-span-6 sm:col-span-3 text-right">
+                      <span className="text-white/70 text-xs tabular-nums">{cat.qty.toLocaleString('fr-FR')}</span>
+                    </div>
+                    <div className="col-span-6 sm:col-span-3 text-right">
+                      <span className="text-white font-semibold text-sm tabular-nums">{cat.amount.toLocaleString('fr-FR')} {sym}</span>
+                    </div>
+                  </button>
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        {cat.products.map(p => (
+                          <div key={p.name} className="grid grid-cols-12 items-center px-3 sm:px-4 py-2 border-t border-white/[0.04] hover:bg-white/3 transition-colors">
+                            <div className="col-span-12 sm:col-span-6 pl-5 sm:pl-7">
+                              <p className="text-white/60 text-xs truncate">{p.name}</p>
+                            </div>
+                            <div className="col-span-6 sm:col-span-3 text-right">
+                              <span className="text-white/50 text-xs tabular-nums">{p.qty.toLocaleString('fr-FR')}</span>
+                            </div>
+                            <div className="col-span-6 sm:col-span-3 text-right">
+                              <span className="text-white/70 text-xs tabular-nums">{p.amount.toLocaleString('fr-FR')} {sym}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+            {salesByCategory.length > 0 && (
+              <div className="grid grid-cols-12 items-center px-3 sm:px-4 py-2.5 border-t border-white/8 bg-white/3">
+                <div className="col-span-6 text-white/60 text-xs font-semibold">Total</div>
+                <div className="col-span-3 text-right text-white/50 text-xs tabular-nums">{summaryTotalQty.toLocaleString('fr-FR')}</div>
+                <div className="col-span-3 text-right text-white font-black text-sm tabular-nums">{summaryTotalAmount.toLocaleString('fr-FR')} {sym}</div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -1466,6 +1645,9 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
   const siteId = currentSite?.id ?? null;
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showDetail, setShowDetail] = useState(false);
+  const [printDetail, setPrintDetail] = useState(false);
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1486,15 +1668,27 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
 
   const totalAmount = expenses.reduce((s, e) => s + e.amount, 0);
 
-  const byCategory = useMemo(() => {
-    const map: Record<string, { category: string; total: number; count: number }> = {};
+  interface LabelAgg { label: string; count: number; amount: number; }
+  interface CatAgg { category: string; total: number; count: number; labels: LabelAgg[]; }
+
+  const byCategory = useMemo<CatAgg[]>(() => {
+    const map: Record<string, { total: number; count: number; labels: Record<string, LabelAgg> }> = {};
     expenses.forEach(e => {
       const key = e.category || 'Sans catégorie';
-      if (!map[key]) map[key] = { category: key, total: 0, count: 0 };
+      const lbl = e.description || 'Sans libellé';
+      if (!map[key]) map[key] = { total: 0, count: 0, labels: {} };
       map[key].total += e.amount;
       map[key].count++;
+      if (!map[key].labels[lbl]) map[key].labels[lbl] = { label: lbl, count: 0, amount: 0 };
+      map[key].labels[lbl].count++;
+      map[key].labels[lbl].amount += e.amount;
     });
-    return Object.values(map).sort((a, b) => b.total - a.total);
+    return Object.entries(map).map(([category, v]) => ({
+      category,
+      total: v.total,
+      count: v.count,
+      labels: Object.values(v.labels).sort((a, b) => b.amount - a.amount),
+    })).sort((a, b) => b.total - a.total);
   }, [expenses]);
 
   const rangeLabel = range.from === range.to
@@ -1512,13 +1706,29 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
     const docHeader = buildA4Header(settings);
     const fmtAmount = (n: number) => `${Math.round(n).toLocaleString('fr-FR')}\u00a0${sym}`;
 
-    const catRowsHtml = byCategory.map(c => `
-      <tr>
-        <td>${esc(c.category)}</td>
-        <td class="text-right">${c.count}</td>
-        <td class="text-right">${fmtAmount(c.total)}</td>
-      </tr>
-    `).join('');
+    // ── Summary: category → labels ────────────────────────────
+    const summaryBodyHtml = byCategory.map(cat => {
+      const labelRows = cat.labels.map(l => `
+        <tr>
+          <td style="padding-left:18px;">${esc(l.label)}</td>
+          <td class="text-right">${l.count}</td>
+          <td class="text-right">${fmtAmount(l.amount)}</td>
+        </tr>
+      `).join('');
+      return `
+        <tr class="cat-row"><td>${esc(cat.category)}</td><td class="text-right">${cat.count}</td><td class="text-right">${fmtAmount(cat.total)}</td></tr>
+        ${labelRows}
+      `;
+    }).join('');
+    const summaryTable = `
+      <h3>Synthèse par catégorie</h3>
+      <table>
+        <colgroup><col style="width:55%;"><col style="width:15%;"><col style="width:30%;"></colgroup>
+        <thead><tr><th>Libellé</th><th class="text-right">Nb op.</th><th class="text-right">Montant</th></tr></thead>
+        <tbody>${summaryBodyHtml || `<tr><td colspan="3" style="text-align:center;color:#555;">Aucune donnée.</td></tr>`}</tbody>
+        <tfoot><tr class="total-row"><td>Total</td><td class="text-right">${expenses.length}</td><td class="text-right">${fmtAmount(totalAmount)}</td></tr></tfoot>
+      </table>
+    `;
 
     const detailRowsHtml = expenses.map(e => `
       <tr>
@@ -1532,6 +1742,21 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
         <td class="text-right">${fmtAmount(e.amount)}</td>
       </tr>
     `).join('');
+    const detailTable = printDetail ? `
+      <h3 style="margin-top:14px;">Détail des dépenses</h3>
+      <table>
+        <colgroup>
+          <col style="width:10%;"><col style="width:7%;"><col style="width:12%;"><col style="width:18%;">
+          <col style="width:13%;"><col style="width:12%;"><col style="width:10%;"><col style="width:13%;">
+        </colgroup>
+        <thead><tr>
+          <th>Date</th><th>N°</th><th>Catégorie</th><th>Libellé</th>
+          <th>Bénéficiaire</th><th>Caissier</th><th>Mode</th><th class="text-right">Montant</th>
+        </tr></thead>
+        <tbody>${detailRowsHtml || `<tr><td colspan="8" style="text-align:center;color:#555;">Aucune dépense sur cette période.</td></tr>`}</tbody>
+        <tfoot><tr class="total-row"><td colspan="7">Total</td><td class="text-right">${fmtAmount(totalAmount)}</td></tr></tfoot>
+      </table>
+    ` : '';
 
     const html = `<!DOCTYPE html>
 <html lang="fr">
@@ -1539,7 +1764,8 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
   <meta charset="utf-8">
   <meta name="color-scheme" content="only light">
   <title>Dépenses de caisse</title>
-  <style>${A4_CSS_LANDSCAPE}</style>
+  <style>${A4_CSS}
+.cat-row td{font-weight:700;background:#e8e8f0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.sub-row td{font-weight:600;border-top:1px solid #ccc;}</style>
 </head>
 <body>
   ${docHeader}
@@ -1551,26 +1777,8 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
     <div class="stat"><span class="stat-val">${expenses.length}</span><span class="stat-lbl">Écritures</span></div>
     <div class="stat"><span class="stat-val">${byCategory.length}</span><span class="stat-lbl">Catégories</span></div>
   </div>
-  <h3>Sous-totaux par catégorie</h3>
-  <table>
-    <colgroup><col style="width:50%;"><col style="width:20%;"><col style="width:30%;"></colgroup>
-    <thead><tr><th>Catégorie</th><th class="text-right">Nombre</th><th class="text-right">Total</th></tr></thead>
-    <tbody>${catRowsHtml || `<tr><td colspan="3" style="text-align:center;color:#555;">Aucune donnée.</td></tr>`}</tbody>
-    <tfoot><tr class="total-row"><td>Total</td><td class="text-right">${expenses.length}</td><td class="text-right">${fmtAmount(totalAmount)}</td></tr></tfoot>
-  </table>
-  <h3 style="margin-top:14px;">Détail des dépenses</h3>
-  <table>
-    <colgroup>
-      <col style="width:10%;"><col style="width:7%;"><col style="width:12%;"><col style="width:18%;">
-      <col style="width:13%;"><col style="width:12%;"><col style="width:10%;"><col style="width:13%;">
-    </colgroup>
-    <thead><tr>
-      <th>Date</th><th>N°</th><th>Catégorie</th><th>Libellé</th>
-      <th>Bénéficiaire</th><th>Caissier</th><th>Mode</th><th class="text-right">Montant</th>
-    </tr></thead>
-    <tbody>${detailRowsHtml || `<tr><td colspan="8" style="text-align:center;color:#555;">Aucune dépense sur cette période.</td></tr>`}</tbody>
-    <tfoot><tr class="total-row"><td colspan="7">Total</td><td class="text-right">${fmtAmount(totalAmount)}</td></tr></tfoot>
-  </table>
+  ${summaryTable}
+  ${detailTable}
   <div class="doc-footer"><span>${esc(settings.restaurant_name)}</span><span>Dépenses de caisse — ${esc(rangeLabel)}</span></div>
 </body>
 </html>`;
@@ -1585,7 +1793,22 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
         <StatCard label="Catégories" value={byCategory.length} color="text-blue-400" />
       </div>
 
-      <div className="flex gap-2 justify-end">
+      <div className="flex gap-2 justify-end items-center flex-wrap">
+        <button
+          onClick={() => setShowDetail(v => !v)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all"
+        >
+          {showDetail ? 'Voir la synthèse' : 'Voir le détail'}
+        </button>
+        <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={printDetail}
+            onChange={e => setPrintDetail(e.target.checked)}
+            className="w-3.5 h-3.5 accent-blue-500"
+          />
+          Inclure le détail à l'impression
+        </label>
         <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
           <Download size={12} /> Exporter CSV
         </button>
@@ -1594,58 +1817,115 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
         </button>
       </div>
 
-      {/* Category subtotals */}
-      {byCategory.length > 0 && (
-        <div className="glass-card rounded-2xl border border-white/8 overflow-hidden">
-          <div className="px-4 py-3 border-b border-white/8 bg-white/3">
-            <h3 className="text-white/60 text-xs font-semibold">Sous-totaux par catégorie</h3>
+      {showDetail ? (
+        /* Detail list */
+        <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+          <div className="hidden sm:flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
+            <div className="flex-1 text-white/30 text-xs font-medium">Libellé</div>
+            <div className="w-24 text-white/30 text-xs font-medium">Catégorie</div>
+            <div className="hidden md:block w-24 text-white/30 text-xs font-medium">Bénéficiaire</div>
+            <div className="hidden md:block w-20 text-white/30 text-xs font-medium">Mode</div>
+            <div className="w-20 text-white/30 text-xs font-medium text-right">Date</div>
+            <div className="w-24 text-white/30 text-xs font-medium text-right">Montant</div>
           </div>
-          <div className="hidden sm:grid grid-cols-12 px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
-            <div className="col-span-6">Catégorie</div>
-            <div className="col-span-3 text-right">Nombre</div>
-            <div className="col-span-3 text-right">Total</div>
-          </div>
-          {byCategory.map(c => (
-            <div key={c.category} className="grid grid-cols-12 items-center px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
-              <div className="col-span-12 sm:col-span-6"><p className="text-white text-sm font-medium truncate">{c.category}</p></div>
-              <div className="col-span-6 sm:col-span-3 text-right"><span className="text-white/50 text-xs">{c.count}</span></div>
-              <div className="col-span-6 sm:col-span-3 text-right"><span className="text-amber-400 font-semibold text-sm">{c.total.toLocaleString('fr-FR')} {sym}</span></div>
+          {loading ? (
+            Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
+          ) : expenses.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <DollarSign size={28} className="text-white/15 mb-2" />
+              <p className="text-white/30 text-sm">Aucune dépense sur cette période</p>
+            </div>
+          ) : expenses.map(e => (
+            <div key={e.id} className="flex items-center gap-3 px-3 sm:px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-xs sm:text-sm truncate">{e.description || '—'}</p>
+                {e.reference && <p className="text-white/30 text-[10px] truncate">Réf: {e.reference}</p>}
+              </div>
+              <div className="hidden sm:block w-24"><span className="text-xs text-white/40">{e.category || '—'}</span></div>
+              <div className="hidden md:block w-24"><span className="text-xs text-white/40 truncate block">{e.recipient || '—'}</span></div>
+              <div className="hidden md:block w-20"><span className="text-xs text-white/40">{PAYMENT_LABELS[e.payment_method] ?? e.payment_method}</span></div>
+              <div className="hidden sm:block w-20 text-right"><span className="text-xs text-white/40">{e.expense_date}</span></div>
+              <div className="w-24 text-right"><span className="text-amber-400 font-semibold text-xs sm:text-sm">{e.amount.toLocaleString('fr-FR')} {sym}</span></div>
             </div>
           ))}
         </div>
-      )}
-
-      {/* Detail list */}
-      <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
-        <div className="hidden sm:flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
-          <div className="flex-1 text-white/30 text-xs font-medium">Libellé</div>
-          <div className="w-24 text-white/30 text-xs font-medium">Catégorie</div>
-          <div className="hidden md:block w-24 text-white/30 text-xs font-medium">Bénéficiaire</div>
-          <div className="hidden md:block w-20 text-white/30 text-xs font-medium">Mode</div>
-          <div className="w-20 text-white/30 text-xs font-medium text-right">Date</div>
-          <div className="w-24 text-white/30 text-xs font-medium text-right">Montant</div>
-        </div>
-        {loading ? (
-          Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
-        ) : expenses.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12">
-            <DollarSign size={28} className="text-white/15 mb-2" />
-            <p className="text-white/30 text-sm">Aucune dépense sur cette période</p>
-          </div>
-        ) : expenses.map(e => (
-          <div key={e.id} className="flex items-center gap-3 px-3 sm:px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
-            <div className="flex-1 min-w-0">
-              <p className="text-white text-xs sm:text-sm truncate">{e.description || '—'}</p>
-              {e.reference && <p className="text-white/30 text-[10px] truncate">Réf: {e.reference}</p>}
+      ) : (
+        /* Category → label summary */
+        byCategory.length > 0 ? (
+          <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+              <h3 className="text-white/60 text-xs font-semibold">Synthèse par catégorie</h3>
+              <span className="text-white/40 text-[11px]">{byCategory.length} catégories</span>
             </div>
-            <div className="hidden sm:block w-24"><span className="text-xs text-white/40">{e.category || '—'}</span></div>
-            <div className="hidden md:block w-24"><span className="text-xs text-white/40 truncate block">{e.recipient || '—'}</span></div>
-            <div className="hidden md:block w-20"><span className="text-xs text-white/40">{PAYMENT_LABELS[e.payment_method] ?? e.payment_method}</span></div>
-            <div className="hidden sm:block w-20 text-right"><span className="text-xs text-white/40">{e.expense_date}</span></div>
-            <div className="w-24 text-right"><span className="text-amber-400 font-semibold text-xs sm:text-sm">{e.amount.toLocaleString('fr-FR')} {sym}</span></div>
+            <div className="hidden sm:grid grid-cols-12 px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+              <div className="col-span-6">Catégorie / Libellé</div>
+              <div className="col-span-3 text-right">Nb op.</div>
+              <div className="col-span-3 text-right">Montant</div>
+            </div>
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-10 border-b border-white/5 animate-pulse bg-white/2" />)
+            ) : byCategory.map(cat => {
+              const isExpanded = expandedCat === cat.category;
+              return (
+                <div key={cat.category} className="border-b border-white/5 last:border-0">
+                  <button
+                    onClick={() => setExpandedCat(isExpanded ? null : cat.category)}
+                    className="w-full grid grid-cols-12 items-center px-4 py-3 text-left bg-white/3 hover:bg-white/5 transition-colors"
+                  >
+                    <div className="col-span-12 sm:col-span-6 flex items-center gap-2">
+                      <ChevronDown size={12} className={`text-white/40 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      <p className="text-white text-sm font-semibold truncate">{cat.category}</p>
+                    </div>
+                    <div className="col-span-6 sm:col-span-3 text-right">
+                      <span className="text-white/70 text-xs tabular-nums">{cat.count}</span>
+                    </div>
+                    <div className="col-span-6 sm:col-span-3 text-right">
+                      <span className="text-amber-400 font-semibold text-sm tabular-nums">{cat.total.toLocaleString('fr-FR')} {sym}</span>
+                    </div>
+                  </button>
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        {cat.labels.map(l => (
+                          <div key={l.label} className="grid grid-cols-12 items-center px-4 py-2 border-t border-white/[0.04] hover:bg-white/3 transition-colors">
+                            <div className="col-span-12 sm:col-span-6 pl-5 sm:pl-7">
+                              <p className="text-white/60 text-xs truncate">{l.label}</p>
+                            </div>
+                            <div className="col-span-6 sm:col-span-3 text-right">
+                              <span className="text-white/50 text-xs tabular-nums">{l.count}</span>
+                            </div>
+                            <div className="col-span-6 sm:col-span-3 text-right">
+                              <span className="text-white/70 text-xs tabular-nums">{l.amount.toLocaleString('fr-FR')} {sym}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+            <div className="grid grid-cols-12 items-center px-4 py-2.5 border-t border-white/8 bg-white/3">
+              <div className="col-span-6 text-white/60 text-xs font-semibold">Total</div>
+              <div className="col-span-3 text-right text-white/50 text-xs tabular-nums">{expenses.length}</div>
+              <div className="col-span-3 text-right text-amber-400 font-black text-sm tabular-nums">{totalAmount.toLocaleString('fr-FR')} {sym}</div>
+            </div>
           </div>
-        ))}
-      </div>
+        ) : (
+          <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex flex-col items-center justify-center py-12">
+              <DollarSign size={28} className="text-white/15 mb-2" />
+              <p className="text-white/30 text-sm">Aucune dépense sur cette période</p>
+            </div>
+          </div>
+        )
+      )}
     </div>
   );
 }
@@ -1682,16 +1962,20 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
   const [sales, setSales] = useState<ActivitySaleRow[]>([]);
+  const [saleItems, setSaleItems] = useState<{ product_name: string; variant_label: string | null; quantity: number; subtotal: number; sale: { created_at: string; status: string; site_id: string | null } | null; product: { category_id: string | null } | null; category: { name: string } | null }[]>([]);
   const [purchases, setPurchases] = useState<ActivityPurchaseRow[]>([]);
   const [purchaseItems, setPurchaseItems] = useState<{ purchase_order_id: string; total_price: number }[]>([]);
   const [invoices, setInvoices] = useState<{ id: string; purchase_order_id: string | null; total_amount: number; invoice_date: string; status: string }[]>([]);
   const [expenses, setExpenses] = useState<ActivityExpenseRow[]>([]);
   const [suppliers, setSuppliers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [showDetail, setShowDetail] = useState(false);
+  const [printDetail, setPrintDetail] = useState(false);
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [salesRes, poRes, poiRes, invRes, expRes, supRes] = await Promise.all([
+    const [salesRes, itemsRes, poRes, poiRes, invRes, expRes, supRes] = await Promise.all([
       supabase.from('sales')
         .select('id, sale_number, total, discount_amount, created_at, status, cancelled_at')
         .eq('site_id', siteId)
@@ -1699,6 +1983,12 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
         .lte('created_at', range.to + 'T23:59:59')
         .order('created_at', { ascending: false })
         .limit(5000),
+      supabase.from('sale_items')
+        .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status, site_id), product:products!inner(category_id), category:categories!inner(name)')
+        .eq('sale.site_id', siteId)
+        .gte('sale.created_at', range.from + 'T00:00:00')
+        .lte('sale.created_at', range.to + 'T23:59:59')
+        .eq('sale.status', 'paid'),
       supabase.from('purchase_orders')
         .select('id, order_number, supplier_id, order_date, total_amount, status')
         .eq('site_id', siteId)
@@ -1733,6 +2023,7 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
     const paidSales = ((salesRes.data ?? []) as { id: string; sale_number: number; total: number; discount_amount: number; created_at: string; status: string; cancelled_at: string | null }[])
       .filter(s => s.status === 'paid');
     setSales(paidSales.map(s => ({ id: s.id, sale_number: s.sale_number, total: s.total, discount_amount: s.discount_amount, created_at: s.created_at })));
+    setSaleItems((itemsRes.data ?? []) as typeof saleItems);
 
     setPurchases((poRes.data ?? []) as ActivityPurchaseRow[]);
     setPurchaseItems((poiRes.data ?? []) as { purchase_order_id: string; total_price: number }[]);
@@ -1774,6 +2065,32 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
     return Object.entries(map).map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total);
   }, [expenses]);
 
+  // Sales by category (from sale_items)
+  interface SalesCatAgg { name: string; amount: number; qty: number; }
+  const salesByCategory = useMemo<SalesCatAgg[]>(() => {
+    const map: Record<string, { amount: number; qty: number }> = {};
+    saleItems.forEach(item => {
+      const catName = item.category?.name ?? 'Sans catégorie';
+      if (!map[catName]) map[catName] = { amount: 0, qty: 0 };
+      map[catName].amount += item.subtotal;
+      map[catName].qty += item.quantity;
+    });
+    return Object.entries(map).map(([name, v]) => ({ name, amount: v.amount, qty: v.qty })).sort((a, b) => b.amount - a.amount);
+  }, [saleItems]);
+
+  // Purchases by supplier
+  interface SuppAgg { name: string; count: number; amount: number; }
+  const purchasesBySupplier = useMemo<SuppAgg[]>(() => {
+    const map: Record<string, { count: number; amount: number }> = {};
+    validPurchases.forEach(p => {
+      const supName = suppliers[p.supplier_id ?? ''] ?? 'Sans fournisseur';
+      if (!map[supName]) map[supName] = { count: 0, amount: 0 };
+      map[supName].count++;
+      map[supName].amount += p.total_amount;
+    });
+    return Object.entries(map).map(([name, v]) => ({ name, count: v.count, amount: v.amount })).sort((a, b) => b.amount - a.amount);
+  }, [validPurchases, suppliers]);
+
   const rangeLabel = range.from === range.to
     ? new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
     : `Du ${new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} au ${new Date(range.to).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
@@ -1783,6 +2100,60 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
     const docHeader = buildA4Header(settings);
     const fmtAmount = (n: number) => `${Math.round(n).toLocaleString('fr-FR')}\u00a0${sym}`;
 
+    // ── Summary: sales by category ────────────────────────────
+    const salesSummaryRows = salesByCategory.map(c => `
+      <tr>
+        <td>${esc(c.name)}</td>
+        <td class="text-right">${c.qty.toLocaleString('fr-FR')}</td>
+        <td class="text-right">${fmtAmount(c.amount)}</td>
+      </tr>
+    `).join('');
+    const salesSummaryTable = `
+      <h3>Ventes par catégorie</h3>
+      <table>
+        <colgroup><col style="width:55%;"><col style="width:15%;"><col style="width:30%;"></colgroup>
+        <thead><tr><th>Catégorie</th><th class="text-right">Qté</th><th class="text-right">Montant net</th></tr></thead>
+        <tbody>${salesSummaryRows || `<tr><td colspan="3" style="text-align:center;color:#555;">Aucune vente.</td></tr>`}</tbody>
+        <tfoot><tr class="total-row"><td>Total ventes nettes</td><td class="text-right">${salesByCategory.reduce((s, c) => s + c.qty, 0).toLocaleString('fr-FR')}</td><td class="text-right">${fmtAmount(netSales)}</td></tr></tfoot>
+      </table>
+    `;
+
+    // ── Summary: purchases by supplier ────────────────────────
+    const suppSummaryRows = purchasesBySupplier.map(s => `
+      <tr>
+        <td>${esc(s.name)}</td>
+        <td class="text-right">${s.count}</td>
+        <td class="text-right">${fmtAmount(s.amount)}</td>
+      </tr>
+    `).join('');
+    const suppSummaryTable = `
+      <h3 style="margin-top:14px;">Achats par fournisseur</h3>
+      <table>
+        <colgroup><col style="width:55%;"><col style="width:15%;"><col style="width:30%;"></colgroup>
+        <thead><tr><th>Fournisseur</th><th class="text-right">Commandes</th><th class="text-right">Montant</th></tr></thead>
+        <tbody>${suppSummaryRows || `<tr><td colspan="3" style="text-align:center;color:#555;">Aucun achat.</td></tr>`}</tbody>
+        <tfoot><tr class="total-row"><td>Total achats</td><td class="text-right">${validPurchases.length}</td><td class="text-right">${fmtAmount(totalPurchases)}</td></tr></tfoot>
+      </table>
+    `;
+
+    // ── Summary: expenses by category ─────────────────────────
+    const expSummaryRows = expensesByCategory.map(c => `
+      <tr>
+        <td>${esc(c.category)}</td>
+        <td class="text-right">${fmtAmount(c.total)}</td>
+      </tr>
+    `).join('');
+    const expSummaryTable = `
+      <h3 style="margin-top:14px;">Dépenses par catégorie</h3>
+      <table>
+        <colgroup><col style="width:70%;"><col style="width:30%;"></colgroup>
+        <thead><tr><th>Catégorie</th><th class="text-right">Montant</th></tr></thead>
+        <tbody>${expSummaryRows || `<tr><td colspan="2" style="text-align:center;color:#555;">Aucune dépense.</td></tr>`}</tbody>
+        <tfoot><tr class="total-row"><td>Total dépenses</td><td class="text-right">${fmtAmount(totalExpenses)}</td></tr></tfoot>
+      </table>
+    `;
+
+    // ── Detail blocks (only if printDetail) ───────────────────
     const salesRowsHtml = sales.slice(0, 200).map(s => `
       <tr>
         <td>${esc(String(s.sale_number))}</td>
@@ -1811,13 +2182,35 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
       </tr>
     `).join('');
 
+    const detailHtml = printDetail ? `
+      <h3 style="margin-top:14px;">Ventes nettes (${sales.length} tickets)</h3>
+      <table>
+        <colgroup><col style="width:15%;"><col style="width:25%;"><col style="width:25%;"><col style="width:35%;"></colgroup>
+        <thead><tr><th>N°</th><th>Date</th><th class="text-right">Remises</th><th class="text-right">Total</th></tr></thead>
+        <tbody>${salesRowsHtml || `<tr><td colspan="4" style="text-align:center;color:#555;">Aucune vente.</td></tr>`}</tbody>
+      </table>
+      <h3 style="margin-top:14px;">Achats fournisseurs (${validPurchases.length} commandes)</h3>
+      <table>
+        <colgroup><col style="width:15%;"><col style="width:20%;"><col style="width:35%;"><col style="width:15%;"><col style="width:15%;"></colgroup>
+        <thead><tr><th>N°</th><th>Date</th><th>Fournisseur</th><th>Statut</th><th class="text-right">Montant</th></tr></thead>
+        <tbody>${purchaseRowsHtml || `<tr><td colspan="5" style="text-align:center;color:#555;">Aucun achat.</td></tr>`}</tbody>
+      </table>
+      <h3 style="margin-top:14px;">Dépenses (${expenses.length} écritures)</h3>
+      <table>
+        <colgroup><col style="width:15%;"><col style="width:20%;"><col style="width:50%;"><col style="width:15%;"></colgroup>
+        <thead><tr><th>Date</th><th>Catégorie</th><th>Libellé</th><th class="text-right">Montant</th></tr></thead>
+        <tbody>${expenseRowsHtml || `<tr><td colspan="4" style="text-align:center;color:#555;">Aucune dépense.</td></tr>`}</tbody>
+      </table>
+    ` : '';
+
     const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="color-scheme" content="only light">
   <title>Bilan d'activité</title>
-  <style>${A4_CSS_LANDSCAPE}</style>
+  <style>${A4_CSS}
+.cat-row td{font-weight:700;background:#e8e8f0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.sub-row td{font-weight:600;border-top:1px solid #ccc;}</style>
 </head>
 <body>
   ${docHeader}
@@ -1831,31 +2224,10 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
     <div class="stat" style="border-color:${activityBalance >= 0 ? '#1a7f37' : '#cf222e'};"><span class="stat-val" style="color:${activityBalance >= 0 ? '#1a7f37' : '#cf222e'};">${fmtAmount(activityBalance)}</span><span class="stat-lbl">Solde d'activité</span></div>
   </div>
   <p style="font-size:9pt;color:#555;margin-bottom:12px;">Le solde d'activité ne tient pas compte des variations de stock.</p>
-
-  <h3>Ventes nettes (${sales.length} tickets)</h3>
-  <table>
-    <colgroup><col style="width:15%;"><col style="width:25%;"><col style="width:25%;"><col style="width:35%;"></colgroup>
-    <thead><tr><th>N°</th><th>Date</th><th class="text-right">Remises</th><th class="text-right">Total</th></tr></thead>
-    <tbody>${salesRowsHtml || `<tr><td colspan="4" style="text-align:center;color:#555;">Aucune vente.</td></tr>`}</tbody>
-    <tfoot><tr class="total-row"><td colspan="3">Total ventes nettes</td><td class="text-right">${fmtAmount(netSales)}</td></tr></tfoot>
-  </table>
-
-  <h3 style="margin-top:14px;">Achats fournisseurs (${validPurchases.length} commandes)</h3>
-  <table>
-    <colgroup><col style="width:15%;"><col style="width:20%;"><col style="width:35%;"><col style="width:15%;"><col style="width:15%;"></colgroup>
-    <thead><tr><th>N°</th><th>Date</th><th>Fournisseur</th><th>Statut</th><th class="text-right">Montant</th></tr></thead>
-    <tbody>${purchaseRowsHtml || `<tr><td colspan="5" style="text-align:center;color:#555;">Aucun achat.</td></tr>`}</tbody>
-    <tfoot><tr class="total-row"><td colspan="4">Total achats</td><td class="text-right">${fmtAmount(totalPurchases)}</td></tr></tfoot>
-  </table>
-
-  <h3 style="margin-top:14px;">Dépenses (${expenses.length} écritures)</h3>
-  <table>
-    <colgroup><col style="width:15%;"><col style="width:20%;"><col style="width:50%;"><col style="width:15%;"></colgroup>
-    <thead><tr><th>Date</th><th>Catégorie</th><th>Libellé</th><th class="text-right">Montant</th></tr></thead>
-    <tbody>${expenseRowsHtml || `<tr><td colspan="4" style="text-align:center;color:#555;">Aucune dépense.</td></tr>`}</tbody>
-    <tfoot><tr class="total-row"><td colspan="3">Total dépenses</td><td class="text-right">${fmtAmount(totalExpenses)}</td></tr></tfoot>
-  </table>
-
+  ${salesSummaryTable}
+  ${suppSummaryTable}
+  ${expSummaryTable}
+  ${detailHtml}
   <h3 style="margin-top:14px;">Récapitulatif</h3>
   <table>
     <colgroup><col style="width:70%;"><col style="width:30%;"></colgroup>
@@ -1866,7 +2238,6 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
       <tr class="total-row"><td>Solde d'activité</td><td class="text-right">${fmtAmount(activityBalance)}</td></tr>
     </tbody>
   </table>
-
   <div class="doc-footer"><span>${esc(settings.restaurant_name)}</span><span>Bilan d'activité — ${esc(rangeLabel)}</span></div>
 </body>
 </html>`;
@@ -1889,86 +2260,172 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
 
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-white/30 text-[11px]">Le solde d'activité ne tient pas compte des variations de stock.</p>
-        <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-xs transition-all">
-          <Printer size={12} /> Imprimer
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowDetail(v => !v)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all"
+          >
+            {showDetail ? 'Voir la synthèse' : 'Voir le détail'}
+          </button>
+          <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={printDetail}
+              onChange={e => setPrintDetail(e.target.checked)}
+              className="w-3.5 h-3.5 accent-blue-500"
+            />
+            Inclure le détail à l'impression
+          </label>
+          <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-xs transition-all">
+            <Printer size={12} /> Imprimer
+          </button>
+        </div>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <RefreshCw size={24} className="animate-spin text-white/20" />
         </div>
-      ) : (
+      ) : showDetail ? (
         <div className="space-y-3">
-          {/* Sales summary */}
+          {/* Sales detail */}
           <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
               <h3 className="text-white/60 text-xs font-semibold">Ventes nettes ({sales.length} tickets)</h3>
               <span className="text-emerald-400 font-bold text-sm">{netSales.toLocaleString('fr-FR')} {sym}</span>
             </div>
-            {sales.slice(0, 5).map(s => (
+            {sales.slice(0, 50).map(s => (
               <div key={s.id} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
                 <span className="text-white/50 text-xs">#{s.sale_number} · {new Date(s.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>
                 <span className="text-white/70 text-xs">{s.total.toLocaleString('fr-FR')} {sym}</span>
               </div>
             ))}
-            {sales.length > 5 && <div className="px-4 py-2 text-white/30 text-[10px] text-center">+ {sales.length - 5} autres — voir impression pour le détail</div>}
+            {sales.length > 50 && <div className="px-4 py-2 text-white/30 text-[10px] text-center">+ {sales.length - 50} autres — voir impression pour le détail</div>}
             {sales.length === 0 && <div className="px-4 py-6 text-center text-white/30 text-sm">Aucune vente validée</div>}
           </div>
 
-          {/* Purchases summary */}
+          {/* Purchases detail */}
           <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
               <h3 className="text-white/60 text-xs font-semibold">Achats fournisseurs ({validPurchases.length} commandes)</h3>
               <span className="text-amber-400 font-bold text-sm">{totalPurchases.toLocaleString('fr-FR')} {sym}</span>
             </div>
-            {validPurchases.slice(0, 5).map(p => (
+            {validPurchases.slice(0, 50).map(p => (
               <div key={p.id} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
                 <span className="text-white/50 text-xs">BC-{String(p.order_number).padStart(4, '0')} · {suppliers[p.supplier_id ?? ''] ?? '—'} · {p.order_date}</span>
                 <span className="text-white/70 text-xs">{p.total_amount.toLocaleString('fr-FR')} {sym}</span>
               </div>
             ))}
-            {validPurchases.length > 5 && <div className="px-4 py-2 text-white/30 text-[10px] text-center">+ {validPurchases.length - 5} autres</div>}
+            {validPurchases.length > 50 && <div className="px-4 py-2 text-white/30 text-[10px] text-center">+ {validPurchases.length - 50} autres</div>}
             {validPurchases.length === 0 && <div className="px-4 py-6 text-center text-white/30 text-sm">Aucun achat validé</div>}
           </div>
 
-          {/* Expenses summary */}
+          {/* Expenses detail */}
           <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
               <h3 className="text-white/60 text-xs font-semibold">Dépenses ({expenses.length} écritures)</h3>
               <span className="text-red-400 font-bold text-sm">{totalExpenses.toLocaleString('fr-FR')} {sym}</span>
             </div>
-            {expensesByCategory.map(c => (
-              <div key={c.category} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
-                <span className="text-white/50 text-xs">{c.category}</span>
-                <span className="text-white/70 text-xs">{c.total.toLocaleString('fr-FR')} {sym}</span>
+            {expenses.slice(0, 50).map(e => (
+              <div key={e.id} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
+                <span className="text-white/50 text-xs">{e.category} · {e.description}</span>
+                <span className="text-white/70 text-xs">{e.amount.toLocaleString('fr-FR')} {sym}</span>
               </div>
             ))}
+            {expenses.length > 50 && <div className="px-4 py-2 text-white/30 text-[10px] text-center">+ {expenses.length - 50} autres</div>}
             {expenses.length === 0 && <div className="px-4 py-6 text-center text-white/30 text-sm">Aucune dépense</div>}
           </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Sales by category summary */}
+          <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+              <h3 className="text-white/60 text-xs font-semibold">Ventes par catégorie ({salesByCategory.length})</h3>
+              <span className="text-emerald-400 font-bold text-sm">{netSales.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            <div className="hidden sm:grid grid-cols-12 px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+              <div className="col-span-6">Catégorie</div>
+              <div className="col-span-3 text-right">Qté</div>
+              <div className="col-span-3 text-right">Montant net</div>
+            </div>
+            {salesByCategory.length === 0 ? (
+              <div className="px-4 py-6 text-center text-white/30 text-sm">Aucune vente validée</div>
+            ) : salesByCategory.map(c => (
+              <div key={c.name} className="grid grid-cols-12 items-center px-4 py-2.5 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+                <div className="col-span-12 sm:col-span-6"><p className="text-white text-sm font-medium truncate">{c.name}</p></div>
+                <div className="col-span-6 sm:col-span-3 text-right"><span className="text-white/50 text-xs tabular-nums">{c.qty.toLocaleString('fr-FR')}</span></div>
+                <div className="col-span-6 sm:col-span-3 text-right"><span className="text-emerald-400 font-semibold text-sm tabular-nums">{c.amount.toLocaleString('fr-FR')} {sym}</span></div>
+              </div>
+            ))}
+          </div>
 
-          {/* Balance recap */}
-          <div className="glass-card rounded-2xl border border-white/8 p-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-white/60 text-sm">Ventes nettes</span>
-                <span className="text-emerald-400 font-semibold text-sm">{netSales.toLocaleString('fr-FR')} {sym}</span>
+          {/* Purchases by supplier summary */}
+          <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+              <h3 className="text-white/60 text-xs font-semibold">Achats par fournisseur ({purchasesBySupplier.length})</h3>
+              <span className="text-amber-400 font-bold text-sm">{totalPurchases.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            <div className="hidden sm:grid grid-cols-12 px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+              <div className="col-span-6">Fournisseur</div>
+              <div className="col-span-3 text-right">Commandes</div>
+              <div className="col-span-3 text-right">Montant</div>
+            </div>
+            {purchasesBySupplier.length === 0 ? (
+              <div className="px-4 py-6 text-center text-white/30 text-sm">Aucun achat validé</div>
+            ) : purchasesBySupplier.map(s => (
+              <div key={s.name} className="grid grid-cols-12 items-center px-4 py-2.5 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+                <div className="col-span-12 sm:col-span-6"><p className="text-white text-sm font-medium truncate">{s.name}</p></div>
+                <div className="col-span-6 sm:col-span-3 text-right"><span className="text-white/50 text-xs tabular-nums">{s.count}</span></div>
+                <div className="col-span-6 sm:col-span-3 text-right"><span className="text-amber-400 font-semibold text-sm tabular-nums">{s.amount.toLocaleString('fr-FR')} {sym}</span></div>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/60 text-sm">Moins: achats fournisseurs</span>
-                <span className="text-amber-400 text-sm">-{totalPurchases.toLocaleString('fr-FR')} {sym}</span>
+            ))}
+          </div>
+
+          {/* Expenses by category summary */}
+          <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+              <h3 className="text-white/60 text-xs font-semibold">Dépenses par catégorie ({expensesByCategory.length})</h3>
+              <span className="text-red-400 font-bold text-sm">{totalExpenses.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            <div className="hidden sm:grid grid-cols-12 px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+              <div className="col-span-9">Catégorie</div>
+              <div className="col-span-3 text-right">Montant</div>
+            </div>
+            {expensesByCategory.length === 0 ? (
+              <div className="px-4 py-6 text-center text-white/30 text-sm">Aucune dépense</div>
+            ) : expensesByCategory.map(c => (
+              <div key={c.category} className="grid grid-cols-12 items-center px-4 py-2.5 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
+                <div className="col-span-12 sm:col-span-9"><p className="text-white text-sm font-medium truncate">{c.category}</p></div>
+                <div className="col-span-12 sm:col-span-3 text-right"><span className="text-red-400 font-semibold text-sm tabular-nums">{c.total.toLocaleString('fr-FR')} {sym}</span></div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Balance recap (always visible) */}
+      {!loading && (
+        <div className="glass-card rounded-2xl border border-white/8 p-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-white/60 text-sm">Ventes nettes</span>
+              <span className="text-emerald-400 font-semibold text-sm">{netSales.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-white/60 text-sm">Moins: achats fournisseurs</span>
+              <span className="text-amber-400 text-sm">-{totalPurchases.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-white/60 text-sm">Moins: dépenses</span>
+              <span className="text-red-400 text-sm">-{totalExpenses.toLocaleString('fr-FR')} {sym}</span>
+            </div>
+            <div className="border-t border-white/10 pt-2 mt-1">
               <div className="flex items-center justify-between">
-                <span className="text-white/60 text-sm">Moins: dépenses</span>
-                <span className="text-red-400 text-sm">-{totalExpenses.toLocaleString('fr-FR')} {sym}</span>
-              </div>
-              <div className="border-t border-white/10 pt-2 mt-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-white font-bold text-base">Solde d'activité</span>
-                  <span className={`font-black text-lg ${activityBalance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {activityBalance.toLocaleString('fr-FR')} {sym}
-                  </span>
-                </div>
+                <span className="text-white font-bold text-base">Solde d'activité</span>
+                <span className={`font-black text-lg ${activityBalance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {activityBalance.toLocaleString('fr-FR')} {sym}
+                </span>
               </div>
             </div>
           </div>
