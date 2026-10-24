@@ -85,6 +85,9 @@
     border: 1px solid #000 !important;
   }
 
+  thead { display: table-header-group !important; }
+  tfoot { display: table-row-group !important; break-inside: avoid; page-break-inside: avoid; }
+
   th {
     background: #f0f0f0 !important;
     border: 1px solid #000 !important;

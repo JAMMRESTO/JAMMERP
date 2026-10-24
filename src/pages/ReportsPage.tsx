@@ -315,8 +315,7 @@ interface SaleItemRow {
   quantity: number;
   subtotal: number;
   sale: { created_at: string; status: string; site_id: string | null } | null;
-  product: { category_id: string | null } | null;
-  category: { name: string } | null;
+  product: { category_id: string | null; category: { name: string } | null } | null;
 }
 
 function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string; settings: PrintReportSettings }) {
@@ -327,7 +326,6 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [hideEmptyDays, setHideEmptyDays] = useState(false);
-  const [printDetail, setPrintDetail] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [sortBy, setSortBy] = useState<'amount' | 'qty'>('amount');
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
@@ -347,12 +345,15 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
         .limit(5000),
       supabase
         .from('sale_items')
-        .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status, site_id), product:products!inner(category_id), category:categories!inner(name)')
+        .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status, site_id), product:products!left(category_id, category:categories!left(name))')
         .eq('sale.site_id', siteId)
         .gte('sale.created_at', range.from + 'T00:00:00')
         .lte('sale.created_at', range.to + 'T23:59:59')
         .eq('sale.status', 'paid'),
     ]);
+    if (itemsRes.error) {
+      console.error('[SalesReport] sale_items query error:', itemsRes.error);
+    }
     setSales((salesRes.data ?? []) as SaleRow[]);
     setSaleItems((itemsRes.data ?? []) as SaleItemRow[]);
     setSelectedDay(null);
@@ -424,7 +425,7 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
   const salesByCategory = useMemo<CategoryAgg[]>(() => {
     const catMap: Record<string, { qty: number; amount: number; products: Record<string, ProductAgg> }> = {};
     (saleItems as SaleItemRow[]).forEach(item => {
-      const catName = item.category?.name ?? 'Sans catégorie';
+      const catName = item.product?.category?.name ?? 'Sans catégorie';
       const prodName = formatItemDisplayName(item.product_name, item.variant_label);
       if (!catMap[catName]) catMap[catName] = { qty: 0, amount: 0, products: {} };
       catMap[catName].qty += item.quantity;
@@ -562,7 +563,7 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
         <td>${esc(new Date(s.created_at).toLocaleString('fr-FR'))}</td>
       </tr>
     `).join('');
-    const detailBlock = printDetail && sales.length > 0 ? `
+    const detailBlock = showDetail && sales.length > 0 ? `
       <h3 style="margin-top:14px;">Détail des tickets</h3>
       <table>
         <colgroup>
@@ -657,15 +658,6 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
             className="w-3.5 h-3.5 accent-blue-500"
           />
           Masquer les jours sans vente
-        </label>
-        <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={printDetail}
-            onChange={e => setPrintDetail(e.target.checked)}
-            className="w-3.5 h-3.5 accent-blue-500"
-          />
-          Inclure le détail à l'impression
         </label>
         <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
           <Download size={12} /> Exporter CSV
@@ -904,35 +896,53 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
 // ─────────────────────────────────────────────────────────
 // PRODUCTS REPORT
 // ─────────────────────────────────────────────────────────
+interface ProductCatAgg {
+  name: string;
+  qty: number;
+  amount: number;
+  products: { name: string; qty: number; amount: number }[];
+}
+
 function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: string; settings: PrintReportSettings }) {
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
-  const [items, setItems] = useState<{ product_name: string; total_qty: number; total_revenue: number }[]>([]);
+  const [categories, setCategories] = useState<ProductCatAgg[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('sale_items')
-      .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status)')
+      .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status, site_id), product:products!left(category_id, category:categories!left(name))')
       .eq('sale.site_id', siteId)
       .gte('sale.created_at', range.from + 'T00:00:00')
       .lte('sale.created_at', range.to + 'T23:59:59')
       .eq('sale.status', 'paid');
 
+    if (error) {
+      console.error('[ProductsReport] sale_items query error:', error);
+    }
     if (data) {
-      const map: Record<string, { total_qty: number; total_revenue: number }> = {};
-      (data as { product_name: string; variant_label: string | null; quantity: number; subtotal: number }[]).forEach(item => {
-        const displayName = formatItemDisplayName(item.product_name, item.variant_label);
-        if (!map[displayName]) map[displayName] = { total_qty: 0, total_revenue: 0 };
-        map[displayName].total_qty += item.quantity;
-        map[displayName].total_revenue += item.subtotal;
+      const catMap: Record<string, { qty: number; amount: number; products: Record<string, { name: string; qty: number; amount: number }> }> = {};
+      (data as { product_name: string; variant_label: string | null; quantity: number; subtotal: number; product: { category: { name: string } | null } | null }[]).forEach(item => {
+        const catName = item.product?.category?.name ?? 'Sans catégorie';
+        const prodName = formatItemDisplayName(item.product_name, item.variant_label);
+        if (!catMap[catName]) catMap[catName] = { qty: 0, amount: 0, products: {} };
+        catMap[catName].qty += item.quantity;
+        catMap[catName].amount += item.subtotal;
+        if (!catMap[catName].products[prodName]) catMap[catName].products[prodName] = { name: prodName, qty: 0, amount: 0 };
+        catMap[catName].products[prodName].qty += item.quantity;
+        catMap[catName].products[prodName].amount += item.subtotal;
       });
-      setItems(
-        Object.entries(map)
-          .map(([name, v]) => ({ product_name: name, ...v }))
-          .sort((a, b) => b.total_revenue - a.total_revenue)
+      setCategories(
+        Object.entries(catMap).map(([name, v]) => ({
+          name,
+          qty: v.qty,
+          amount: v.amount,
+          products: Object.values(v.products).sort((a, b) => b.qty - a.qty),
+        })).sort((a, b) => b.qty - a.qty)
       );
     }
     setLoading(false);
@@ -940,22 +950,79 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
 
   useEffect(() => { load(); }, [load]);
 
-  const top10 = items.slice(0, 10);
-  const totalRevenue = items.reduce((s, i) => s + i.total_revenue, 0);
+  const totalQty = categories.reduce((s, c) => s + c.qty, 0);
+  const totalRevenue = categories.reduce((s, c) => s + c.amount, 0);
+  const totalProducts = categories.reduce((s, c) => s + c.products.length, 0);
 
-  const COLORS = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#06B6D4','#F97316','#EC4899','#14B8A6','#6366F1'];
+  const handleExport = () => {
+    const rows: (string | number)[][] = [];
+    categories.forEach(cat => {
+      cat.products.forEach(p => {
+        rows.push([cat.name, p.name, p.qty, p.amount]);
+      });
+    });
+    exportToCSV(['Catégorie', 'Produit', 'Qté vendue', `CA (${sym})`], rows, 'rapport_produits');
+  };
 
-  const handleExport = () => exportToCSV(
-    ['Produit', 'Qté vendue', `CA (${sym})`],
-    items.map(i => [i.product_name, i.total_qty, i.total_revenue]),
-    'rapport_produits'
-  );
+  const rangeLabel = range.from === range.to
+    ? new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    : `Du ${new Date(range.from).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} au ${new Date(range.to).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+
+  const handlePrint = () => {
+    const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const docHeader = buildA4Header(settings);
+    const fmtAmount = (n: number) => `${Math.round(n).toLocaleString('fr-FR')}\u00a0${sym}`;
+
+    const bodyHtml = categories.map(cat => {
+      const prodRows = cat.products.map(p => `
+        <tr>
+          <td style="padding-left:18px;">${esc(p.name)}</td>
+          <td class="text-right">${p.qty.toLocaleString('fr-FR')}</td>
+          <td class="text-right">${fmtAmount(p.amount)}</td>
+        </tr>
+      `).join('');
+      return `
+        <tr class="cat-row"><td>${esc(cat.name)}</td><td class="text-right">${cat.qty.toLocaleString('fr-FR')}</td><td class="text-right">${fmtAmount(cat.amount)}</td></tr>
+        ${prodRows}
+      `;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="only light">
+  <title>Rapport Produits</title>
+  <style>${A4_CSS}
+.cat-row td{font-weight:700;background:#e8e8f0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}</style>
+</head>
+<body>
+  ${docHeader}
+  <h2>Rapport produits par catégorie</h2>
+  <p class="subtitle">${esc(rangeLabel)} — édité le ${esc(dateStr)}</p>
+  <hr class="sep">
+  <div class="stat-block">
+    <div class="stat"><span class="stat-val">${totalProducts}</span><span class="stat-lbl">Produits vendus</span></div>
+    <div class="stat"><span class="stat-val">${totalQty.toLocaleString('fr-FR')}</span><span class="stat-lbl">Unités totales</span></div>
+    <div class="stat"><span class="stat-val">${fmtAmount(totalRevenue)}</span><span class="stat-lbl">CA produits</span></div>
+  </div>
+  <table>
+    <colgroup><col style="width:60%;"><col style="width:15%;"><col style="width:25%;"></colgroup>
+    <thead><tr><th>Produit</th><th class="text-right">Qté</th><th class="text-right">Montant net</th></tr></thead>
+    <tbody>${bodyHtml || `<tr><td colspan="3" style="text-align:center;color:#555;">Aucune donnée.</td></tr>`}</tbody>
+    <tfoot><tr class="total-row"><td>Total</td><td class="text-right">${totalQty.toLocaleString('fr-FR')}</td><td class="text-right">${fmtAmount(totalRevenue)}</td></tr></tfoot>
+  </table>
+  <div class="doc-footer"><span>${esc(settings.restaurant_name)}</span><span>Rapport produits — ${esc(rangeLabel)}</span></div>
+</body>
+</html>`;
+    printViaIframe(html);
+  };
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <StatCard label="Produits vendus (réf)" value={items.length} color="text-white" />
-        <StatCard label="Unités totales" value={items.reduce((s, i) => s + i.total_qty, 0).toLocaleString('fr-FR')} color="text-blue-400" />
+        <StatCard label="Produits vendus (réf)" value={totalProducts} color="text-white" />
+        <StatCard label="Unités totales" value={totalQty.toLocaleString('fr-FR')} color="text-blue-400" />
         <StatCard label="CA produits" value={totalRevenue.toLocaleString('fr-FR')} sub={sym} color="text-emerald-400" />
       </div>
 
@@ -963,75 +1030,82 @@ function ProductsReport({ range, sym, settings }: { range: PeriodRange; sym: str
         <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
           <Download size={12} /> Exporter CSV
         </button>
-        <button onClick={() => printReportHtml(buildReportHtml('Rapport Produits', settings,
-            ['Rang', 'Produit', 'Qté vendue', `CA (${sym})`, 'Part %'],
-            items.map((item, idx) => [idx + 1, item.product_name, item.total_qty.toLocaleString('fr-FR'), `${item.total_revenue.toLocaleString('fr-FR')} ${sym}`, totalRevenue > 0 ? `${((item.total_revenue / totalRevenue) * 100).toFixed(1)}%` : '0%'])
-          ))} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
+        <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
           <Printer size={12} /> Imprimer
         </button>
       </div>
 
-      {top10.length > 0 && (
-        <div className="glass-card rounded-2xl p-5 border border-white/8">
-          <h3 className="text-white font-semibold text-sm mb-4">Top 10 produits (CA)</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={top10} layout="vertical" barSize={14}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
-              <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => Number(v) >= 1000 ? `${Math.round(Number(v)/1000)}k` : Number(v).toLocaleString('fr-FR')} />
-              <YAxis type="category" dataKey="product_name" width={110} tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<ChartTooltip sym={sym} />} />
-              <Bar dataKey="total_revenue" name="CA" radius={[0, 4, 4, 0]}>
-                {top10.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
       <div ref={printRef} className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
-        <div className="hidden sm:flex items-center gap-3 px-4 py-2.5 border-b border-white/8 bg-white/3">
-          <div className="w-8 text-white/30 text-xs font-medium">Rang</div>
-          <div className="flex-1 text-white/30 text-xs font-medium">Produit</div>
-          <div className="w-24 text-white/30 text-xs font-medium text-right">Qté vendue</div>
-          <div className="w-28 text-white/30 text-xs font-medium text-right">CA</div>
-          <div className="w-20 text-white/30 text-xs font-medium text-right">Part</div>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
+          <h3 className="text-white/60 text-xs font-semibold">Produits par catégorie</h3>
+          <span className="text-white/40 text-[11px]">{categories.length} catégories · tri par quantité décroissante</span>
+        </div>
+        <div className="hidden sm:grid grid-cols-12 px-4 py-2 border-b border-white/5 bg-white/2 text-white/30 text-[10px] font-medium uppercase tracking-wider">
+          <div className="col-span-6">Catégorie / Produit</div>
+          <div className="col-span-3 text-right">Qté</div>
+          <div className="col-span-3 text-right">Montant net</div>
         </div>
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-12 border-b border-white/5 animate-pulse bg-white/2" />)
-        ) : items.length === 0 ? (
+        ) : categories.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <Package size={28} className="text-white/15 mb-2" />
             <p className="text-white/30 text-sm">Aucune donnée sur cette période</p>
           </div>
-        ) : items.map((item, idx) => {
-          const pct = totalRevenue > 0 ? (item.total_revenue / totalRevenue) * 100 : 0;
+        ) : categories.map(cat => {
+          const isExpanded = expandedCat === cat.name;
           return (
-            <div key={item.product_name} className="px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors">
-              <div className="flex items-center gap-3">
-                <div className="w-8 text-white/30 text-xs font-bold flex-shrink-0">{idx + 1}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white text-sm font-medium truncate">{item.product_name}</p>
-                  <div className="h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
-                    <div className="h-full rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
-                  </div>
+            <div key={cat.name} className="border-b border-white/5 last:border-0">
+              <button
+                onClick={() => setExpandedCat(isExpanded ? null : cat.name)}
+                className="w-full grid grid-cols-12 items-center px-4 py-3 text-left bg-white/3 hover:bg-white/5 transition-colors"
+              >
+                <div className="col-span-12 sm:col-span-6 flex items-center gap-2">
+                  <ChevronDown size={12} className={`text-white/40 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  <p className="text-white text-sm font-semibold truncate">{cat.name}</p>
                 </div>
-                <div className="hidden sm:block w-24 text-right">
-                  <p className="text-white/70 text-sm">{item.total_qty.toLocaleString('fr-FR')}</p>
+                <div className="col-span-6 sm:col-span-3 text-right">
+                  <span className="text-white/70 text-xs tabular-nums">{cat.qty.toLocaleString('fr-FR')}</span>
                 </div>
-                <div className="w-20 sm:w-28 text-right">
-                  <p className="text-white font-semibold text-sm">{item.total_revenue.toLocaleString('fr-FR')} {sym}</p>
+                <div className="col-span-6 sm:col-span-3 text-right">
+                  <span className="text-emerald-400 font-semibold text-sm tabular-nums">{cat.amount.toLocaleString('fr-FR')} {sym}</span>
                 </div>
-                <div className="hidden sm:block w-20 text-right">
-                  <p className="text-blue-400 text-xs font-medium">{pct.toFixed(1)}%</p>
-                </div>
-              </div>
-              <div className="sm:hidden mt-2 flex items-center justify-between text-xs">
-                <span className="text-white/40">Qté: <span className="text-white/70">{item.total_qty.toLocaleString('fr-FR')}</span></span>
-                <span className="text-blue-400 font-medium">{pct.toFixed(1)}%</span>
-              </div>
+              </button>
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                  >
+                    {cat.products.map(p => (
+                      <div key={p.name} className="grid grid-cols-12 items-center px-4 py-2 border-t border-white/[0.04] hover:bg-white/3 transition-colors">
+                        <div className="col-span-12 sm:col-span-6 pl-5 sm:pl-7">
+                          <p className="text-white/60 text-xs truncate">{p.name}</p>
+                        </div>
+                        <div className="col-span-6 sm:col-span-3 text-right">
+                          <span className="text-white/50 text-xs tabular-nums">{p.qty.toLocaleString('fr-FR')}</span>
+                        </div>
+                        <div className="col-span-6 sm:col-span-3 text-right">
+                          <span className="text-white/70 text-xs tabular-nums">{p.amount.toLocaleString('fr-FR')} {sym}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           );
         })}
+        {categories.length > 0 && (
+          <div className="grid grid-cols-12 items-center px-4 py-2.5 border-t border-white/8 bg-white/3">
+            <div className="col-span-6 text-white/60 text-xs font-semibold">Total</div>
+            <div className="col-span-3 text-right text-white/50 text-xs tabular-nums">{totalQty.toLocaleString('fr-FR')}</div>
+            <div className="col-span-3 text-right text-emerald-400 font-black text-sm tabular-nums">{totalRevenue.toLocaleString('fr-FR')} {sym}</div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1646,7 +1720,6 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDetail, setShowDetail] = useState(false);
-  const [printDetail, setPrintDetail] = useState(false);
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -1742,7 +1815,7 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
         <td class="text-right">${fmtAmount(e.amount)}</td>
       </tr>
     `).join('');
-    const detailTable = printDetail ? `
+    const detailTable = showDetail ? `
       <h3 style="margin-top:14px;">Détail des dépenses</h3>
       <table>
         <colgroup>
@@ -1800,15 +1873,6 @@ function CashExpensesReport({ range, sym, settings }: { range: PeriodRange; sym:
         >
           {showDetail ? 'Voir la synthèse' : 'Voir le détail'}
         </button>
-        <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={printDetail}
-            onChange={e => setPrintDetail(e.target.checked)}
-            className="w-3.5 h-3.5 accent-blue-500"
-          />
-          Inclure le détail à l'impression
-        </label>
         <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white text-xs transition-all">
           <Download size={12} /> Exporter CSV
         </button>
@@ -1962,7 +2026,7 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
   const { currentSite } = useTenant();
   const siteId = currentSite?.id ?? null;
   const [sales, setSales] = useState<ActivitySaleRow[]>([]);
-  const [saleItems, setSaleItems] = useState<{ product_name: string; variant_label: string | null; quantity: number; subtotal: number; sale: { created_at: string; status: string; site_id: string | null } | null; product: { category_id: string | null } | null; category: { name: string } | null }[]>([]);
+  const [saleItems, setSaleItems] = useState<{ product_name: string; variant_label: string | null; quantity: number; subtotal: number; sale: { created_at: string; status: string; site_id: string | null } | null; product: { category_id: string | null; category: { name: string } | null } | null }[]>([]);
   const [purchases, setPurchases] = useState<ActivityPurchaseRow[]>([]);
   const [purchaseItems, setPurchaseItems] = useState<{ purchase_order_id: string; total_price: number }[]>([]);
   const [invoices, setInvoices] = useState<{ id: string; purchase_order_id: string | null; total_amount: number; invoice_date: string; status: string }[]>([]);
@@ -1970,7 +2034,6 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
   const [suppliers, setSuppliers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [showDetail, setShowDetail] = useState(false);
-  const [printDetail, setPrintDetail] = useState(false);
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -1984,7 +2047,7 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
         .order('created_at', { ascending: false })
         .limit(5000),
       supabase.from('sale_items')
-        .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status, site_id), product:products!inner(category_id), category:categories!inner(name)')
+        .select('product_name, variant_label, quantity, subtotal, sale:sales!inner(created_at, status, site_id), product:products!left(category_id, category:categories!left(name))')
         .eq('sale.site_id', siteId)
         .gte('sale.created_at', range.from + 'T00:00:00')
         .lte('sale.created_at', range.to + 'T23:59:59')
@@ -2024,6 +2087,9 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
       .filter(s => s.status === 'paid');
     setSales(paidSales.map(s => ({ id: s.id, sale_number: s.sale_number, total: s.total, discount_amount: s.discount_amount, created_at: s.created_at })));
     setSaleItems((itemsRes.data ?? []) as typeof saleItems);
+    if (itemsRes.error) {
+      console.error('[ActivityBalanceReport] sale_items query error:', itemsRes.error);
+    }
 
     setPurchases((poRes.data ?? []) as ActivityPurchaseRow[]);
     setPurchaseItems((poiRes.data ?? []) as { purchase_order_id: string; total_price: number }[]);
@@ -2070,7 +2136,7 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
   const salesByCategory = useMemo<SalesCatAgg[]>(() => {
     const map: Record<string, { amount: number; qty: number }> = {};
     saleItems.forEach(item => {
-      const catName = item.category?.name ?? 'Sans catégorie';
+      const catName = item.product?.category?.name ?? 'Sans catégorie';
       if (!map[catName]) map[catName] = { amount: 0, qty: 0 };
       map[catName].amount += item.subtotal;
       map[catName].qty += item.quantity;
@@ -2153,7 +2219,7 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
       </table>
     `;
 
-    // ── Detail blocks (only if printDetail) ───────────────────
+    // ── Detail blocks (only if showDetail) ───────────────────
     const salesRowsHtml = sales.slice(0, 200).map(s => `
       <tr>
         <td>${esc(String(s.sale_number))}</td>
@@ -2182,7 +2248,7 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
       </tr>
     `).join('');
 
-    const detailHtml = printDetail ? `
+    const detailHtml = showDetail ? `
       <h3 style="margin-top:14px;">Ventes nettes (${sales.length} tickets)</h3>
       <table>
         <colgroup><col style="width:15%;"><col style="width:25%;"><col style="width:25%;"><col style="width:35%;"></colgroup>
@@ -2267,15 +2333,6 @@ function ActivityBalanceReport({ range, sym, settings }: { range: PeriodRange; s
           >
             {showDetail ? 'Voir la synthèse' : 'Voir le détail'}
           </button>
-          <label className="flex items-center gap-1.5 text-white/50 text-xs cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={printDetail}
-              onChange={e => setPrintDetail(e.target.checked)}
-              className="w-3.5 h-3.5 accent-blue-500"
-            />
-            Inclure le détail à l'impression
-          </label>
           <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/25 text-blue-200 hover:text-white text-xs transition-all">
             <Printer size={12} /> Imprimer
           </button>

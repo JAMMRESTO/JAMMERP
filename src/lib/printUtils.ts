@@ -87,7 +87,7 @@ const A4_BODY_CSS = `
     overflow-wrap: anywhere;
   }
   thead { display: table-header-group; }
-  tfoot { display: table-footer-group; }
+  tfoot { display: table-row-group; break-inside: avoid; page-break-inside: avoid; }
   tr { page-break-inside: avoid; }
   th {
     background: #f0f0f0 !important;
