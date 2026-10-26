@@ -47,6 +47,9 @@ interface POSContextType {
   // Component stock availability
   checkProductAvailability: (productId: string, additionalQty?: number, drinkComponentId?: string | null) => ComponentAvailabilityResult;
   canIncreaseQty: (cartItemId: string) => ComponentAvailabilityResult;
+  // Cash session
+  cashSessionId: string | null;
+  setCashSessionId: (id: string | null) => void;
   // Checkout
   completeSale: (payments: { method: PaymentMethod; amount: number; reference?: string }[]) => Promise<{ sale: Sale; items: SaleItem[] } | { error: string; componentName?: string; needed?: number; available?: number } | null>;
   deferSale: () => Promise<{ sale: Sale; items: SaleItem[] } | null>;
@@ -80,6 +83,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
   const [currentSaleItems, setCurrentSaleItems] = useState<SaleItem[]>([]);
   const [lastPayments, setLastPayments] = useState<{ method: PaymentMethod; amount: number; reference?: string }[]>([]);
   const [isPendingResume, setIsPendingResume] = useState(false);
+  const [cashSessionId, setCashSessionId] = useState<string | null>(null);
   const [sauces, setSauces] = useState<Sauce[]>([]);
   const [flavors, setFlavors] = useState<Flavor[]>([]);
   const [compositions, setCompositions] = useState<ProductComposition[]>([]);
@@ -394,6 +398,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
         total,
         cashier_id: currentUser?.id ?? null,
         paid_at: new Date().toISOString(),
+        cash_session_id: cashSessionId,
       })
       .select()
       .single();
@@ -497,6 +502,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
         total,
         cashier_id: currentUser?.id ?? null,
         paid_at: null,
+        cash_session_id: cashSessionId,
       })
       .select()
       .single();
@@ -612,6 +618,7 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
       addToCart, removeFromCart, updateQuantity, updateKitchenNote, clearCart,
       subtotal, taxAmount, total, itemCount,
       checkProductAvailability, canIncreaseQty,
+      cashSessionId, setCashSessionId,
       completeSale, deferSale, loadPendingSale, cancelSale, isPendingResume, currentSale, currentSaleItems, lastPayments,
     }}>
       {children}

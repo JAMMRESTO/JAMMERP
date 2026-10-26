@@ -37,6 +37,7 @@ function POSInner({ onMenuToggle }: { onMenuToggle: () => void }) {
     isPendingResume, total: usePOSTotal,
     subtotal, taxAmount, discountAmount,
     orderNotes,
+    setCashSessionId,
   } = usePOS();
   const { settings } = useSettings();
   const { currentUser } = useAuth();
@@ -136,6 +137,11 @@ function POSInner({ onMenuToggle }: { onMenuToggle: () => void }) {
     }
     ensureOpenSession();
   }, [siteId, currentUser?.id, sessionVersion]);
+
+  // Sync active session ID to POSContext so sales are stamped with the right cash_session_id
+  useEffect(() => {
+    setCashSessionId(activeSessionId);
+  }, [activeSessionId, setCashSessionId]);
 
   const loadData = useCallback(async () => {
     if (!siteId) return;

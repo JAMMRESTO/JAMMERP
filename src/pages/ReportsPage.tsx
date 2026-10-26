@@ -709,7 +709,7 @@ function SalesReport({ range, sym, settings }: { range: PeriodRange; sym: string
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-white/3">
           <div>
             <h3 className="text-white font-semibold text-sm">Totaux par jour</h3>
-            <p className="text-white/30 text-[11px] mt-0.5">Cliquez sur une ligne pour filtrer les tickets ci-dessous</p>
+            <p className="text-white/30 text-[11px] mt-0.5">Total des ventes par journée civile (minuit à minuit) — indépendant des clôtures de caisse. Cliquez sur une ligne pour filtrer les tickets ci-dessous</p>
           </div>
           {selectedDay && (
             <button

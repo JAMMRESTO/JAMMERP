@@ -92,13 +92,26 @@ export function XReportReprintModal({ onClose }: XReportReprintModalProps) {
     let byCategory: { name: string; count: number; total: number }[] = [];
     let byUser: { name: string; products: { name: string; qty: number }[] }[] = [];
 
-    const { data: salesData } = await supabase
+    // Query by cash_session_id (with time-range fallback for older sales)
+    let salesData: { id: string; total: number; cashier_id: string | null }[] = [];
+    const { data: bySession } = await supabase
       .from('sales')
       .select('id, total, cashier_id')
       .eq('site_id', siteId)
       .eq('status', 'paid')
-      .gte('paid_at', session.opened_at)
-      .lte('paid_at', session.closed_at ?? new Date().toISOString());
+      .eq('cash_session_id', session.id);
+    if (bySession && bySession.length > 0) {
+      salesData = bySession as typeof salesData;
+    } else {
+      const { data: byTime } = await supabase
+        .from('sales')
+        .select('id, total, cashier_id')
+        .eq('site_id', siteId)
+        .eq('status', 'paid')
+        .gte('paid_at', session.opened_at)
+        .lte('paid_at', session.closed_at ?? new Date().toISOString());
+      salesData = (byTime ?? []) as typeof salesData;
+    }
 
     const saleIds = (salesData ?? []).map(s => s.id);
     const totalSales = (salesData ?? []).reduce((s, v) => s + v.total, 0);

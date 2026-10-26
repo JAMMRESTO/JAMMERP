@@ -109,13 +109,26 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
   useEffect(() => {
     async function loadSummary() {
       setLoading(true);
-      // Recupere toutes les ventes payees depuis l'ouverture de session
-      const { data: salesData } = await supabase
-        .from('sales')
-        .select('id, total')
-        .eq('site_id', siteId)
-        .eq('status', 'paid')
-        .gte('paid_at', openedAt);
+      // Recupere toutes les ventes payees rattachees a cette session de caisse
+      let salesData: { id: string; total: number }[] = [];
+      if (sessionId) {
+        const { data } = await supabase
+          .from('sales')
+          .select('id, total')
+          .eq('site_id', siteId)
+          .eq('status', 'paid')
+          .eq('cash_session_id', sessionId);
+        salesData = (data ?? []) as { id: string; total: number }[];
+      } else {
+        // Fallback: pas de session ID, on utilise la plage temporelle
+        const { data } = await supabase
+          .from('sales')
+          .select('id, total')
+          .eq('site_id', siteId)
+          .eq('status', 'paid')
+          .gte('paid_at', openedAt);
+        salesData = (data ?? []) as { id: string; total: number }[];
+      }
 
       const saleIds = (salesData ?? []).map(s => s.id);
       const totalSales = (salesData ?? []).reduce((s, v) => s + v.total, 0);
@@ -202,7 +215,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
       setLoading(false);
     }
     loadSummary();
-  }, [openedAt, siteId]);
+  }, [openedAt, siteId, sessionId]);
 
   const opening = parseFloat(openingBalance) || 0;
   const actual = parseFloat(actualCash) || 0;

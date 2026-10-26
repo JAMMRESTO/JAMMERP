@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   TrendingUp, ShoppingBag, DollarSign, Receipt, Users,
@@ -18,6 +18,7 @@ import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
 import { useTenant } from '../context/TenantContext';
 import { esc, A4_CSS_LANDSCAPE, buildA4Header, printViaIframe } from '../lib/printUtils';
+import { useRealtimeTable } from '../lib/useRealtimeTable';
 import type { Site } from '../types/database';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -546,6 +547,51 @@ export function Dashboard() {
   }, [isTenantOwnerView, isMultiSite, sites, currentSite]);
 
   useEffect(() => { loadDetailData(selDate); }, [loadDetailData, selDate]);
+
+  // ─── Realtime: auto-refresh dashboard when data changes ───
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReload = useCallback(() => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => { load(); loadDetailData(selDate); }, 800);
+  }, [load, loadDetailData, selDate]);
+
+  const realtimeSiteId = currentSite?.id ?? null;
+  useRealtimeTable<{ id: string }>({
+    table: 'sales',
+    siteId: realtimeSiteId,
+    onInsert: () => scheduleReload(),
+    onUpdate: () => scheduleReload(),
+    onDelete: () => scheduleReload(),
+    onReconnect: () => { load(); loadDetailData(selDate); },
+  });
+  useRealtimeTable<{ id: string }>({
+    table: 'orders',
+    siteId: realtimeSiteId,
+    onInsert: () => scheduleReload(),
+    onUpdate: () => scheduleReload(),
+    onDelete: () => scheduleReload(),
+    onReconnect: () => { load(); loadDetailData(selDate); },
+  });
+  useRealtimeTable<{ id: string }>({
+    table: 'expenses',
+    siteId: realtimeSiteId,
+    onInsert: () => scheduleReload(),
+    onUpdate: () => scheduleReload(),
+    onDelete: () => scheduleReload(),
+    onReconnect: () => { load(); },
+  });
+  useRealtimeTable<{ id: string }>({
+    table: 'products',
+    siteId: realtimeSiteId,
+    onUpdate: () => scheduleReload(),
+    onReconnect: () => { load(); },
+  });
+  useRealtimeTable<{ id: string }>({
+    table: 'product_components',
+    siteId: realtimeSiteId,
+    onUpdate: () => scheduleReload(),
+    onReconnect: () => { load(); },
+  });
 
   // ─── Lazy-load product breakdown for a single cashier on demand ───
   const loadCashierProducts = useCallback(async (cashierKey: string, dateStr: string) => {
