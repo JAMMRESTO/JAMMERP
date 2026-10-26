@@ -248,7 +248,13 @@ export function SuperAdminBackupsPage() {
       });
       const result = await res.json();
       if (result.success) {
-        toast('success', `Reinitialisation terminee: ${result.total_deleted} enregistrements supprimes pour ${result.site}`);
+        if (result.total_deleted === 0 && !result.warnings) {
+          toast('error', `Aucun enregistrement supprime pour ${result.site}. Verifiez que le site contient des donnees.`);
+        } else if (result.warnings && result.warnings.length > 0) {
+          toast('error', `${result.total_deleted} supprimes, mais ${result.warnings.length} erreur(s): ${result.warnings.slice(0, 2).join(', ')}`);
+        } else {
+          toast('success', `Reinitialisation terminee: ${result.total_deleted} enregistrements supprimes pour ${result.site}`);
+        }
       } else {
         toast('error', result.error ?? 'Erreur lors de la reinitialisation');
       }

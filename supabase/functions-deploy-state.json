@@ -1,0 +1,41 @@
+{
+  "projectId": "67222092",
+  "functions": {
+    "backup-site": {
+      "hasChanged": false,
+      "hash": "93efdf0a2773f1b9dcddbb3a5b5f07d6c4fabdc3a103f6f7f6e071e1dd517813"
+    },
+    "create-site-manager": {
+      "hasChanged": false,
+      "hash": "2936ba7d5b0601faebcb0795c5b8cdbdea606f47d5f467225135cfca91d076c8"
+    },
+    "create-staff-user": {
+      "hasChanged": false,
+      "hash": "3e0b50fbe88d551298192538909f91f2366cf6445eeeb14839423d55b8f5ea2d"
+    },
+    "create-tenant-account": {
+      "hasChanged": false,
+      "hash": "12dffdb2c27c4cdb4127474f912ad45abe6ec3afa70b0da8a29e50167b46974e"
+    },
+    "delete-tenant": {
+      "hasChanged": false,
+      "hash": "832c4e6d19c726117aa19ab2d6d6e1dabc43bbcddb7e485cf26c0b98146c3960"
+    },
+    "notify-new-tenant": {
+      "hasChanged": false,
+      "hash": "06e7b1f0134857d253ef0df207fae66b135da44d17eaf847f478478428f73f0c"
+    },
+    "reset-site": {
+      "hasChanged": false,
+      "hash": "8d57e85268654da92709158f5d1d650c5503c204affd92d0e979a1b715c4a50f"
+    },
+    "restore-site": {
+      "hasChanged": false,
+      "hash": "d88f127e9a7be2a295f0f465d63055a0a55842609626ffd8f08b7adc95e54f8d"
+    },
+    "super-admin-users": {
+      "hasChanged": false,
+      "hash": "31a17254781e01c6f498e6970631dea123c470e35b819637f5dd981158c0ff63"
+    }
+  }
+}

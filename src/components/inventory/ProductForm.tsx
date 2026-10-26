@@ -28,7 +28,7 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
   const [components, setComponents] = useState<ProductComponent[]>([]);
   const [compositions, setCompositions] = useState<ProductComposition[]>([]);
   const [newCompComponentId, setNewCompComponentId] = useState('');
-  const [newCompQty, setNewCompQty] = useState(1);
+  const [newCompQty, setNewCompQty] = useState('');
   const [newCompIsDrink, setNewCompIsDrink] = useState(false);
   const [newCompDrinkChoice, setNewCompDrinkChoice] = useState<DrinkChoice>('fixed');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -120,7 +120,8 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
   }
 
   function addComposition() {
-    if (!newCompComponentId || newCompQty <= 0) return;
+    const qty = parseFloat(newCompQty) || 0;
+    if (!newCompComponentId || qty <= 0) return;
     const comp = components.find(c => c.id === newCompComponentId);
     if (!comp) return;
     if (compositions.some(c => c.component_id === newCompComponentId && c.is_drink === newCompIsDrink)) return;
@@ -129,14 +130,14 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
       site_id: siteId,
       product_id: product?.id ?? '',
       component_id: newCompComponentId,
-      quantity_per_unit: newCompQty,
+      quantity_per_unit: qty,
       is_drink: newCompIsDrink,
       drink_choice: newCompDrinkChoice,
       component: { id: comp.id, name: comp.name, unit: comp.unit, stock: comp.stock, is_active: comp.is_active },
       created_at: '',
     }]);
     setNewCompComponentId('');
-    setNewCompQty(1);
+    setNewCompQty('');
     setNewCompIsDrink(false);
     setNewCompDrinkChoice('fixed');
   }
@@ -529,10 +530,11 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                   <input
                     type="number"
                     value={form.stock || ''}
-                    onChange={e => f('stock', parseInt(e.target.value) || 0)}
+                    onChange={e => f('stock', parseFloat(e.target.value) || 0)}
                     onFocus={e => e.target.select()}
                     placeholder="0"
                     min={0}
+                    step="any"
                     disabled={!form.track_stock}
                     className="flex-1 h-10 bg-white/5 border-y border-white/10 text-white text-sm text-center focus:outline-none disabled:opacity-40"
                   />
@@ -575,11 +577,11 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                   <input
                     type="number"
                     value={form.stock_deduction_quantity || ''}
-                    onChange={e => f('stock_deduction_quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                    onChange={e => f('stock_deduction_quantity', Math.max(0.01, parseFloat(e.target.value) || 1))}
                     onFocus={e => e.target.select()}
                     placeholder="1"
-                    min={1}
-                    step={1}
+                    min={0}
+                    step="any"
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-all"
                   />
                   <p className="text-white/30 text-xs">Exemple : une portion de 4 tenders déduit 4 pièces du stock.</p>
@@ -607,8 +609,8 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                   {compositions.length > 0 && (
                     <div className="space-y-1.5">
                       {compositions.map((c, i) => (
-                        <div key={i} className="flex items-center gap-2 bg-blue-500/5 border border-blue-500/15 rounded-xl px-3 py-2">
-                          <div className="flex-1 min-w-0">
+                        <div key={i} className="flex flex-wrap items-center gap-2 bg-blue-500/5 border border-blue-500/15 rounded-xl px-3 py-2">
+                          <div className="flex-1 min-w-0 basis-full sm:basis-auto">
                             <span className="text-sm text-blue-200 truncate block">{c.component?.name ?? 'Composant'}</span>
                             {c.is_drink && (
                               <span className="text-[10px] text-amber-400/70 bg-amber-500/10 px-1.5 py-0.5 rounded mt-0.5 inline-block">
@@ -617,9 +619,9 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                             )}
                           </div>
                           <input
-                            type="number" min={0} step={1} value={c.quantity_per_unit || ''}
+                            type="number" min={0} step="any" value={c.quantity_per_unit || ''}
                             onChange={e => updateComposition(i, 'quantity_per_unit', parseFloat(e.target.value) || 0)}
-                            className="w-16 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs text-right focus:outline-none focus:border-blue-500/50"
+                            className="w-16 flex-shrink-0 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs text-right focus:outline-none focus:border-blue-500/50"
                           />
                           {c.is_drink && (
                             <select
@@ -637,32 +639,34 @@ export function ProductForm({ product, categories, onSave, onCancel }: ProductFo
                       ))}
                     </div>
                   )}
-                  <div className="flex items-center gap-2">
+                  <div className="space-y-2">
                     <select
                       value={newCompComponentId} onChange={e => setNewCompComponentId(e.target.value)}
-                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-blue-500/50"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-blue-500/50"
                     >
                       <option value="" className="bg-gray-900">Composant...</option>
                       {components.filter(c => !compositions.some(co => co.component_id === c.id && !co.is_drink)).map(c => (
                         <option key={c.id} value={c.id} className="bg-gray-900">{c.name} ({c.stock} {c.unit})</option>
                       ))}
                     </select>
-                    <input
-                      type="number" min={1} step={1} value={newCompQty || ''}
-                      onChange={e => setNewCompQty(parseFloat(e.target.value) || 1)}
-                      placeholder="Qté"
-                      className="w-16 bg-white/5 border border-white/10 rounded-xl px-2 py-2 text-white text-xs text-center focus:outline-none focus:border-blue-500/50"
-                    />
-                    <button type="button" onClick={() => setNewCompIsDrink(!newCompIsDrink)}
-                      className={`px-2 py-2 rounded-xl text-xs font-medium border transition-all ${newCompIsDrink ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' : 'bg-white/5 border-white/10 text-white/40'}`}
-                      title="Marquer comme boisson"
-                    >
-                      Boisson
-                    </button>
-                    <button type="button" onClick={addComposition} disabled={!newCompComponentId}
-                      className="px-3 py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/25 text-blue-200 text-xs font-medium transition-all disabled:opacity-30">
-                      <Plus size={14} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min={0.01} step="any" value={newCompQty}
+                        onChange={e => setNewCompQty(e.target.value)}
+                        placeholder="Qté"
+                        className="w-16 flex-shrink-0 bg-white/5 border border-white/10 rounded-xl px-2 py-2 text-white text-xs text-center focus:outline-none focus:border-blue-500/50"
+                      />
+                      <button type="button" onClick={() => setNewCompIsDrink(!newCompIsDrink)}
+                        className={`px-2.5 py-2 rounded-xl text-xs font-medium border transition-all flex-shrink-0 ${newCompIsDrink ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' : 'bg-white/5 border-white/10 text-white/40'}`}
+                        title="Marquer comme boisson"
+                      >
+                        Boisson
+                      </button>
+                      <button type="button" onClick={addComposition} disabled={!newCompComponentId || !(parseFloat(newCompQty) > 0)}
+                        className="ml-auto flex items-center gap-1 px-3 py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/25 text-blue-200 text-xs font-medium transition-all disabled:opacity-30 flex-shrink-0">
+                        <Plus size={14} /> Ajouter
+                      </button>
+                    </div>
                   </div>
                   {newCompIsDrink && (
                     <select

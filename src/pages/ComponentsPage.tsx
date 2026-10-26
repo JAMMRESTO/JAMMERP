@@ -407,15 +407,15 @@ function ComponentForm({ component, siteId, onSave, onCancel }: ComponentFormPro
             <label className="text-white/60 text-sm font-medium block mb-1.5">Prix d'achat unit.</label>
             <input
               type="number" value={form.avg_cost || ''} onChange={e => setForm(f => ({ ...f, avg_cost: parseFloat(e.target.value) || 0 }))}
-              placeholder="0" min={0} step="1"
+              placeholder="0" min={0} step="any"
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
             />
           </div>
           <div>
             <label className="text-white/60 text-sm font-medium block mb-1.5">Seuil d'alerte</label>
             <input
-              type="number" value={form.low_stock_threshold || ''} onChange={e => setForm(f => ({ ...f, low_stock_threshold: parseInt(e.target.value) || 0 }))}
-              placeholder="5" min={0}
+              type="number" value={form.low_stock_threshold || ''} onChange={e => setForm(f => ({ ...f, low_stock_threshold: parseFloat(e.target.value) || 0 }))}
+              placeholder="5" min={0} step="any"
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
             />
           </div>
@@ -772,7 +772,7 @@ function AddComponentMovementForm({ components, siteId, currentUser, onSave, onC
           </label>
           <input
             type="number" value={quantity} onChange={e => setQuantity(e.target.value)}
-            placeholder="0" min={0} step={1}
+            placeholder="0" min={0} step="any"
             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/25 focus:outline-none focus:border-blue-500/50 transition-all"
           />
         </div>
