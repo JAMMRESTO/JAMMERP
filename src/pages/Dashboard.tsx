@@ -18,7 +18,6 @@ import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
 import { useTenant } from '../context/TenantContext';
 import { esc, A4_CSS_LANDSCAPE, buildA4Header, printViaIframe } from '../lib/printUtils';
-import { useRealtimeTable } from '../lib/useRealtimeTable';
 import type { Site } from '../types/database';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -549,49 +548,39 @@ export function Dashboard() {
   useEffect(() => { loadDetailData(selDate); }, [loadDetailData, selDate]);
 
   // ─── Realtime: auto-refresh dashboard when data changes ───
+  // Subscribe directly (no site_id filter) so we catch events from ALL sites
+  // the user has access to. RLS ensures we only receive events for authorized rows.
+  // A polling fallback (every 15s) guarantees freshness even if websocket drops.
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleReload = useCallback(() => {
     if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
-    reloadTimerRef.current = setTimeout(() => { load(); loadDetailData(selDate); }, 800);
+    reloadTimerRef.current = setTimeout(() => { load(); loadDetailData(selDate); }, 600);
   }, [load, loadDetailData, selDate]);
 
-  const realtimeSiteId = currentSite?.id ?? null;
-  useRealtimeTable<{ id: string }>({
-    table: 'sales',
-    siteId: realtimeSiteId,
-    onInsert: () => scheduleReload(),
-    onUpdate: () => scheduleReload(),
-    onDelete: () => scheduleReload(),
-    onReconnect: () => { load(); loadDetailData(selDate); },
-  });
-  useRealtimeTable<{ id: string }>({
-    table: 'orders',
-    siteId: realtimeSiteId,
-    onInsert: () => scheduleReload(),
-    onUpdate: () => scheduleReload(),
-    onDelete: () => scheduleReload(),
-    onReconnect: () => { load(); loadDetailData(selDate); },
-  });
-  useRealtimeTable<{ id: string }>({
-    table: 'expenses',
-    siteId: realtimeSiteId,
-    onInsert: () => scheduleReload(),
-    onUpdate: () => scheduleReload(),
-    onDelete: () => scheduleReload(),
-    onReconnect: () => { load(); },
-  });
-  useRealtimeTable<{ id: string }>({
-    table: 'products',
-    siteId: realtimeSiteId,
-    onUpdate: () => scheduleReload(),
-    onReconnect: () => { load(); },
-  });
-  useRealtimeTable<{ id: string }>({
-    table: 'product_components',
-    siteId: realtimeSiteId,
-    onUpdate: () => scheduleReload(),
-    onReconnect: () => { load(); },
-  });
+  // Keep latest reload fn in a ref so the realtime callback always calls the current one
+  const reloadRef = useRef(scheduleReload);
+  reloadRef.current = scheduleReload;
+
+  useEffect(() => {
+    const handleChange = () => reloadRef.current();
+    const channel = supabase
+      .channel('dashboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, handleChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, handleChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, handleChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, handleChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_components' }, handleChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_sessions' }, handleChange)
+      .subscribe();
+
+    // Polling fallback: reload every 15s in case realtime events are missed
+    const pollInterval = setInterval(() => { load(); loadDetailData(selDate); }, 15000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- load/loadDetailData/selDate are captured via reloadRef
 
   // ─── Lazy-load product breakdown for a single cashier on demand ───
   const loadCashierProducts = useCallback(async (cashierKey: string, dateStr: string) => {
