@@ -8,19 +8,11 @@ import { useSettings } from '../../context/SettingsContext';
 import { usePrinter } from '../../context/PrinterContext';
 import { useToast } from '../ui/Toast';
 import { printXReport } from '../../lib/escpos';
-import { formatItemDisplayName } from '../../lib/variantLabel';
-import type { PaymentMethod, CashSession } from '../../types/database';
+import { fetchSessionSummary } from '../../lib/sessionSummary';
+import type { CashSession } from '../../types/database';
 
 interface XReportReprintModalProps {
   onClose: () => void;
-}
-
-interface SalesSummary {
-  total_sales: number;
-  sales_count: number;
-  by_method: Record<PaymentMethod, number>;
-  by_category: { name: string; count: number; total: number }[];
-  by_user: { name: string; products: { name: string; qty: number }[] }[];
 }
 
 function toDateInput(d: Date): string {
@@ -87,85 +79,11 @@ export function XReportReprintModal({ onClose }: XReportReprintModalProps) {
     return d.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   }
 
-  async function loadSummaryForSession(session: CashSession): Promise<SalesSummary> {
-    const byMethod: Record<PaymentMethod, number> = { cash: 0, wave: 0, orange_money: 0, card: 0 };
-    let byCategory: { name: string; count: number; total: number }[] = [];
-    let byUser: { name: string; products: { name: string; qty: number }[] }[] = [];
-
-    // Query by cash_session_id (with time-range fallback for older sales)
-    let salesData: { id: string; total: number; cashier_id: string | null }[] = [];
-    const { data: bySession } = await supabase
-      .from('sales')
-      .select('id, total, cashier_id')
-      .eq('site_id', siteId)
-      .eq('status', 'paid')
-      .eq('cash_session_id', session.id);
-    if (bySession && bySession.length > 0) {
-      salesData = bySession as typeof salesData;
-    } else {
-      const { data: byTime } = await supabase
-        .from('sales')
-        .select('id, total, cashier_id')
-        .eq('site_id', siteId)
-        .eq('status', 'paid')
-        .gte('paid_at', session.opened_at)
-        .lte('paid_at', session.closed_at ?? new Date().toISOString());
-      salesData = (byTime ?? []) as typeof salesData;
-    }
-
-    const saleIds = (salesData ?? []).map(s => s.id);
-    const totalSales = (salesData ?? []).reduce((s, v) => s + v.total, 0);
-
-    if (saleIds.length > 0) {
-      const [{ data: paymentsData }, { data: itemsData }] = await Promise.all([
-        supabase.from('payments').select('method, amount').eq('site_id', siteId).in('sale_id', saleIds),
-        supabase.from('sale_items').select('sale_id, quantity, product_name, variant_label, subtotal, product:products(category:categories(name))').eq('site_id', siteId).in('sale_id', saleIds),
-      ]);
-
-      const cashierIds = [...new Set((salesData ?? []).map(s => s.cashier_id).filter(Boolean))] as string[];
-      const cashierNameMap: Record<string, string> = {};
-      if (cashierIds.length > 0) {
-        const { data: usersData } = await supabase.from('users').select('id, name').in('id', cashierIds);
-        for (const user of usersData ?? []) cashierNameMap[user.id] = user.name;
-      }
-
-      const userProductMap = new Map<string, Map<string, number>>();
-      const saleCashierMap = new Map((salesData ?? []).map(sale => [sale.id, sale.cashier_id ?? '']));
-      for (const item of itemsData ?? []) {
-        const cashierId = saleCashierMap.get(item.sale_id) ?? '';
-        const userName = cashierId ? (cashierNameMap[cashierId] ?? 'UTILISATEUR NON RENSEIGNÉ') : 'UTILISATEUR NON RENSEIGNÉ';
-        if (!userProductMap.has(userName)) userProductMap.set(userName, new Map());
-        const productMap = userProductMap.get(userName)!;
-        const displayName = formatItemDisplayName(item.product_name, (item as any).variant_label);
-        productMap.set(displayName, (productMap.get(displayName) ?? 0) + item.quantity);
-      }
-      byUser = Array.from(userProductMap.entries()).map(([name, productMap]) => ({
-        name,
-        products: Array.from(productMap.entries()).map(([productName, qty]) => ({ name: productName, qty })).sort((a, b) => b.qty - a.qty),
-      }));
-
-      for (const p of paymentsData ?? []) {
-        byMethod[p.method as PaymentMethod] = (byMethod[p.method as PaymentMethod] ?? 0) + p.amount;
-      }
-
-      const catMap = new Map<string, { count: number; total: number }>();
-      for (const item of itemsData ?? []) {
-        const catName = (item as any).product?.category?.name ?? 'Sans catégorie';
-        const existing = catMap.get(catName) ?? { count: 0, total: 0 };
-        existing.count += item.quantity;
-        existing.total += item.subtotal;
-        catMap.set(catName, existing);
-      }
-      byCategory = Array.from(catMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a, b) => b.total - a.total);
-    }
-
-    return { total_sales: totalSales, sales_count: saleIds.length, by_method: byMethod, by_category: byCategory, by_user: byUser };
-  }
-
   async function handleReprint(session: CashSession) {
     setPrintingId(session.id);
     try {
-      const summary = await loadSummaryForSession(session);
+      if (!siteId) throw new Error('Site introuvable');
+      const summary = await fetchSessionSummary(siteId, { id: session.id, opened_at: session.opened_at, closed_at: session.closed_at });
 
       if (printerConnected) {
         const ok = await printXReport(
@@ -184,6 +102,10 @@ export function XReportReprintModal({ onClose }: XReportReprintModalProps) {
             },
             byCategory: summary.by_category,
             byUser: summary.by_user,
+            cashExpenses: summary.cash_expenses,
+            cancelledItems: summary.cancelled_items,
+            cancelledTickets: summary.cancelled_tickets,
+            cancelledTotal: summary.cancelled_total,
             openingBalance: session.opening_balance,
             expectedCash: session.expected_cash,
             actualCash: session.actual_cash,
@@ -209,6 +131,7 @@ export function XReportReprintModal({ onClose }: XReportReprintModalProps) {
     }
     setPrintingId(null);
   }
+
 
   function fmtTime(iso: string) {
     return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });

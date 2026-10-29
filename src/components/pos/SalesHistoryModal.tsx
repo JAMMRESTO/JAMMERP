@@ -50,7 +50,7 @@ function toDateInput(d: Date): string {
 }
 
 export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
-  const { currentSite } = useTenant();
+  const { currentSite, isSiteManager } = useTenant();
   const siteId = currentSite?.id ?? null;
   const { cancelSale } = usePOS();
   const { settings } = useSettings();
@@ -59,7 +59,8 @@ export function SalesHistoryModal({ onClose }: SalesHistoryModalProps) {
   const { toast } = useToast();
   const sym = settings.currency_symbol;
 
-  const isAdmin = !!currentUser?.role?.permissions?.all;
+  const isTenantOwner = !isSiteManager;
+  const isAdmin = isTenantOwner || !!currentUser?.role?.permissions?.all;
 
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);

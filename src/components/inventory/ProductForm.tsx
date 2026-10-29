@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  X, Check, Image, TrendingUp, AlertTriangle, Plus, Minus, Upload, Loader2, Utensils
+  X, Check, Image, TrendingUp, AlertTriangle, Plus, Minus, Upload, Loader2
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../ui/Toast';
 import { useTenant } from '../../context/TenantContext';
 import { useSettings } from '../../context/SettingsContext';
-import type { Product, Category, ProductVariant } from '../../types/database';
+import type { Product, Category, ProductVariant, ProductComponent, ProductComposition, DrinkChoice } from '../../types/database';
 
 const UNITS = ['pièce', 'kg', 'g', 'litre', 'cl', 'ml', 'portion', 'boîte', 'sachet', 'lot'];
 

@@ -4,7 +4,7 @@ import {
   X, Banknote, Smartphone, CreditCard, AlertTriangle,
   CheckCircle2, Loader2, TrendingUp, ShoppingBag,
   Lock, ChevronRight, ArrowUpRight, ArrowDownRight,
-  Receipt, Printer, Eye
+  Receipt, Printer, Eye, Ban
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
@@ -13,16 +13,8 @@ import { useSettings } from '../../context/SettingsContext';
 import { usePrinter } from '../../context/PrinterContext';
 import { useToast } from '../ui/Toast';
 import { printXReport } from '../../lib/escpos';
-import { formatItemDisplayName } from '../../lib/variantLabel';
+import { fetchSessionSummary, emptySessionSummary, type SessionSummary } from '../../lib/sessionSummary';
 import type { PaymentMethod, CashSession } from '../../types/database';
-
-interface SalesSummary {
-  total_sales: number;
-  sales_count: number;
-  by_method: Record<PaymentMethod, number>;
-  by_category: { name: string; count: number; total: number }[];
-  by_user: { name: string; products: { name: string; qty: number }[] }[];
-}
 
 interface CashClosureModalProps {
   onClose: () => void;
@@ -37,7 +29,7 @@ function fmt(n: number, sym: string) {
 
 async function printXCaisse(params: {
   session: CashSession;
-  summary: SalesSummary;
+  summary: SessionSummary;
   restaurantName: string;
   sym: string;
   cashierName: string;
@@ -63,6 +55,10 @@ async function printXCaisse(params: {
       },
       byCategory: summary.by_category,
       byUser: summary.by_user,
+      cashExpenses: summary.cash_expenses,
+      cancelledItems: summary.cancelled_items,
+      cancelledTickets: summary.cancelled_tickets,
+      cancelledTotal: summary.cancelled_total,
       openingBalance: session.opening_balance,
       expectedCash: session.expected_cash,
       actualCash: session.actual_cash,
@@ -97,7 +93,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
   const { toast } = useToast();
 
   const [step, setStep] = useState<'review' | 'preview' | 'count' | 'confirm' | 'done'>('review');
-  const [summary, setSummary] = useState<SalesSummary>({ total_sales: 0, sales_count: 0, by_method: { cash: 0, wave: 0, orange_money: 0, card: 0 }, by_category: [], by_user: [] });
+  const [summary, setSummary] = useState<SessionSummary>(emptySessionSummary);
   const [openingBalance, setOpeningBalance] = useState('');
   const [actualCash, setActualCash] = useState('');
   const [notes, setNotes] = useState('');
@@ -107,119 +103,20 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
 
 
   useEffect(() => {
-    async function loadSummary() {
-      setLoading(true);
-      // Recupere toutes les ventes payees rattachees a cette session de caisse
-      let salesData: { id: string; total: number }[] = [];
-      if (sessionId) {
-        const { data } = await supabase
-          .from('sales')
-          .select('id, total')
-          .eq('site_id', siteId)
-          .eq('status', 'paid')
-          .eq('cash_session_id', sessionId);
-        salesData = (data ?? []) as { id: string; total: number }[];
-      } else {
-        // Fallback: pas de session ID, on utilise la plage temporelle
-        const { data } = await supabase
-          .from('sales')
-          .select('id, total')
-          .eq('site_id', siteId)
-          .eq('status', 'paid')
-          .gte('paid_at', openedAt);
-        salesData = (data ?? []) as { id: string; total: number }[];
-      }
-
-      const saleIds = (salesData ?? []).map(s => s.id);
-      const totalSales = (salesData ?? []).reduce((s, v) => s + v.total, 0);
-
-      const byMethod: Record<PaymentMethod, number> = { cash: 0, wave: 0, orange_money: 0, card: 0 };
-      let byCategory: { name: string; count: number; total: number }[] = [];
-
-      let byUser: { name: string; products: { name: string; qty: number }[] }[] = [];
-
-      if (saleIds.length > 0) {
-        const [{ data: paymentsData }, { data: itemsData }, { data: salesWithCashier }] = await Promise.all([
-          supabase
-            .from('payments')
-            .select('method, amount')
-            .eq('site_id', siteId)
-            .in('sale_id', saleIds),
-          supabase
-            .from('sale_items')
-            .select('sale_id, quantity, product_name, variant_label')
-            .eq('site_id', siteId)
-            .in('sale_id', saleIds),
-          supabase
-            .from('sales')
-            .select('id, cashier_id')
-            .eq('site_id', siteId)
-            .in('id', saleIds),
-        ]);
-
-        const cashierIds = [...new Set((salesWithCashier ?? []).map(s => s.cashier_id).filter(Boolean))] as string[];
-        let cashierNameMap: Record<string, string> = {};
-        if (cashierIds.length > 0) {
-          const { data: usersData } = await supabase
-            .from('users')
-            .select('id, name')
-            .in('id', cashierIds);
-          for (const u of usersData ?? []) {
-            cashierNameMap[u.id] = u.name;
-          }
-        }
-
-        const saleCashierMap: Record<string, string> = {};
-        for (const s of salesWithCashier ?? []) {
-          saleCashierMap[s.id] = s.cashier_id ?? '';
-        }
-
-        const userProductMap = new Map<string, Map<string, number>>();
-        for (const item of itemsData ?? []) {
-          const cashierId = saleCashierMap[item.sale_id] ?? '';
-          const userName = cashierId ? (cashierNameMap[cashierId] ?? 'UTILISATEUR NON RENSEIGNÉ') : 'UTILISATEUR NON RENSEIGNÉ';
-          if (!userProductMap.has(userName)) userProductMap.set(userName, new Map());
-          const productMap = userProductMap.get(userName)!;
-          const displayName = formatItemDisplayName(item.product_name, (item as any).variant_label);
-          productMap.set(displayName, (productMap.get(displayName) ?? 0) + item.quantity);
-        }
-        byUser = Array.from(userProductMap.entries()).map(([name, productMap]) => ({
-          name,
-          products: Array.from(productMap.entries()).map(([pname, qty]) => ({ name: pname, qty })).sort((a, b) => b.qty - a.qty),
-        }));
-
-        for (const p of paymentsData ?? []) {
-          byMethod[p.method as PaymentMethod] = (byMethod[p.method as PaymentMethod] ?? 0) + p.amount;
-        }
-
-        const { data: itemsWithCat } = await supabase
-          .from('sale_items')
-          .select('quantity, subtotal, product:products(category:categories(name))')
-          .eq('site_id', siteId)
-          .in('sale_id', saleIds);
-
-        const catMap = new Map<string, { count: number; total: number }>();
-        for (const item of itemsWithCat ?? []) {
-          const catName = (item as any).product?.category?.name ?? 'Sans categorie';
-          const existing = catMap.get(catName) ?? { count: 0, total: 0 };
-          existing.count += item.quantity;
-          existing.total += item.subtotal;
-          catMap.set(catName, existing);
-        }
-        byCategory = Array.from(catMap.entries())
-          .map(([name, data]) => ({ name, ...data }))
-          .sort((a, b) => b.total - a.total);
-      }
-
-      setSummary({ total_sales: totalSales, sales_count: saleIds.length, by_method: byMethod, by_category: byCategory, by_user: byUser });
+    if (!siteId) return;
+    let cancelled = false;
+    setLoading(true);
+    fetchSessionSummary(siteId, { id: sessionId, opened_at: openedAt, closed_at: null }).then(result => {
+      if (cancelled) return;
+      setSummary(result);
       setLoading(false);
-    }
-    loadSummary();
+    });
+    return () => { cancelled = true; };
   }, [openedAt, siteId, sessionId]);
 
   const opening = parseFloat(openingBalance) || 0;
   const actual = parseFloat(actualCash) || 0;
-  const expectedCash = opening + summary.by_method.cash;
+  const expectedCash = opening + summary.by_method.cash - summary.cash_expenses;
   const difference = actual - expectedCash;
 
   async function handleClose() {
@@ -439,7 +336,7 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                   <motion.div key="preview" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
                     <p className="text-white/60 text-xs mb-3">Aperçu X de caisse — résumé avant clôture</p>
 
-                    {summary.sales_count === 0 ? (
+                    {summary.sales_count === 0 && summary.cancelled_tickets.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-12 text-center">
                         <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-3">
                           <Receipt size={20} className="text-white/20" />
@@ -467,6 +364,13 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                               </div>
                               <span className="text-emerald-400 font-bold text-sm">{fmt(summary.total_sales, sym)}</span>
                             </div>
+                            <div className={`flex items-center justify-between py-2 px-3 rounded-xl border ${summary.cancelled_tickets.length > 0 ? 'bg-red-500/8 border-red-500/20' : 'bg-white/3 border-white/5'}`}>
+                              <div className="flex items-center gap-2">
+                                <Ban size={13} className={summary.cancelled_tickets.length > 0 ? 'text-red-400' : 'text-white/40'} />
+                                <span className="text-white/60 text-xs">Tickets annulés ({summary.cancelled_tickets.length})</span>
+                              </div>
+                              <span className={`font-bold text-sm ${summary.cancelled_tickets.length > 0 ? 'text-red-300' : 'text-white/25'}`}>{fmt(summary.cancelled_total, sym)}</span>
+                            </div>
                           </div>
                         </div>
 
@@ -491,6 +395,12 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                                 {fmt(summary.by_method.cash + summary.by_method.wave + summary.by_method.orange_money + summary.by_method.card, sym)}
                               </span>
                             </div>
+                            {summary.cash_expenses > 0 && (
+                              <div className="flex items-center justify-between py-2 px-3 bg-red-500/8 rounded-xl border border-red-500/20">
+                                <span className="text-red-300 text-xs font-semibold">Dépenses payées en espèces</span>
+                                <span className="text-red-300 font-bold text-sm">- {fmt(summary.cash_expenses, sym)}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -508,6 +418,48 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                                   <span className="text-white font-semibold text-xs flex-shrink-0 ml-2">
                                     {fmt(cat.total, sym)}
                                   </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {summary.cancelled_tickets.length > 0 && (
+                          <div>
+                            <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Détail des tickets annulés</p>
+                            <div className="space-y-1.5">
+                              {summary.cancelled_tickets.map(t => (
+                                <div key={t.id} className="py-2 px-3 bg-red-500/5 rounded-xl border border-red-500/15">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-white/80 text-xs font-semibold">
+                                      Ticket #{t.sale_number}
+                                      <span className="text-white/35 font-normal ml-2">
+                                        {new Date(t.cancelled_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </span>
+                                    <span className="text-red-300 text-xs font-bold flex-shrink-0">{fmt(t.total, sym)}</span>
+                                  </div>
+                                  {(t.cancelled_by_name || t.cancel_reason) && (
+                                    <p className="text-white/40 text-[11px] mt-1 truncate">
+                                      {t.cancelled_by_name && <>Par {t.cancelled_by_name}</>}
+                                      {t.cancelled_by_name && t.cancel_reason && ' — '}
+                                      {t.cancel_reason}
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {summary.cancelled_items.length > 0 && (
+                          <div>
+                            <p className="text-white/40 text-[10px] uppercase tracking-wider font-medium mb-2">Produits annulés</p>
+                            <div className="space-y-1.5">
+                              {summary.cancelled_items.map(item => (
+                                <div key={item.name} className="flex items-center justify-between py-2 px-3 bg-white/3 rounded-xl border border-white/5">
+                                  <span className="text-white/50 text-xs truncate line-through">{item.name} x{item.qty}</span>
+                                  <span className="text-white/50 text-xs line-through flex-shrink-0 ml-2">{fmt(item.total, sym)}</span>
                                 </div>
                               ))}
                             </div>
@@ -582,6 +534,12 @@ export function CashClosureModal({ onClose, onClosed, openedAt, sessionId }: Cas
                           difference > 0  ? 'bg-blue-500/8 border-blue-500/20' :
                                             'bg-red-500/8 border-red-500/20'
                         }`}>
+                          {summary.cash_expenses > 0 && (
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-white/50 text-xs">Dépenses payées en espèces</span>
+                              <span className="text-red-300 text-sm font-semibold">- {fmt(summary.cash_expenses, sym)}</span>
+                            </div>
+                          )}
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="text-white/50 text-xs">Espèces attendues</span>
                             <span className="text-white/70 text-sm font-semibold">{fmt(expectedCash, sym)}</span>

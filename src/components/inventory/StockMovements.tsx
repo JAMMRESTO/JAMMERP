@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus,
-  Search, X, Package, Check, ChevronDown
+  Search, X, Package, Check, ChevronDown, RotateCcw, History, Archive
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../context/AuthContext';
 import { useTenant } from '../../context/TenantContext';
+import { ResetStockModal } from './ResetStockModal';
 import type { StockMovement, Product, StockMovementType, ProductComponent, ComponentStockMovementWithComponent, ComponentMovementType } from '../../types/database';
 
 interface MovementWithProduct extends StockMovement {
@@ -24,6 +25,10 @@ interface DisplayMovement {
   created_at: string;
   name: string;
   unit: string;
+}
+
+function localISODate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 const movementConfig = {
@@ -53,8 +58,12 @@ function AddMovementForm({ products, onSave, onCancel }: AddMovementFormProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const qty = parseFloat(quantity) || 0;
+    const qty = parseInt(quantity, 10) || 0;
     if (!productId || qty <= 0) return;
+    if (!Number.isInteger(parseFloat(quantity))) {
+      toast('error', 'Les produits se comptent en quantités entières');
+      return;
+    }
     setSaving(true);
 
     const stockBefore = selectedProduct?.stock ?? 0;
@@ -64,7 +73,7 @@ function AddMovementForm({ products, onSave, onCancel }: AddMovementFormProps) {
 
     const { error: movErr } = await supabase.from('stock_movements').insert({
       product_id: productId,
-      movement_type: type,
+      type,
       quantity: qty,
       stock_before: stockBefore,
       stock_after: stockAfter,
@@ -342,6 +351,14 @@ function AddComponentMovementForm({ components, onSave, onCancel }: AddComponent
   );
 }
 
+interface ResetLog {
+  id: string;
+  performed_by_name: string;
+  products_reset: number;
+  components_reset: number;
+  created_at: string;
+}
+
 interface StockMovementsProps {
   products: Product[];
   components?: ProductComponent[];
@@ -349,14 +366,25 @@ interface StockMovementsProps {
 }
 
 export function StockMovements({ products, components = [], useComponentStock = false }: StockMovementsProps) {
-  const { currentSite } = useTenant();
+  const { currentSite, isSiteManager } = useTenant();
+  const { currentUser } = useAuth();
+  const toast = useToast();
   const siteId = currentSite?.id ?? null;
+  const isTenantOwner = !isSiteManager;
+  const isAdmin = isTenantOwner || !!currentUser?.role?.permissions?.all;
   const [movements, setMovements] = useState<DisplayMovement[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showReset, setShowReset] = useState(false);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<StockMovementType | ''>('');
   const [page, setPage] = useState(0);
+  const [resetLogs, setResetLogs] = useState<ResetLog[]>([]);
+  const [showResetHistory, setShowResetHistory] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveDate, setArchiveDate] = useState(() => localISODate(new Date()));
   const PAGE_SIZE = 30;
 
   const load = useCallback(async () => {
@@ -367,6 +395,7 @@ export function StockMovements({ products, components = [], useComponentStock = 
         .select('*, component:product_components(id, name, unit)')
         .order('created_at', { ascending: false });
       if (siteId) query = query.eq('site_id', siteId);
+      query = query.eq('is_archived', showArchived);
       const { data } = await query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const compData = (data as ComponentStockMovementWithComponent[]) ?? [];
       setMovements(compData.map(m => ({
@@ -386,14 +415,15 @@ export function StockMovements({ products, components = [], useComponentStock = 
         .select('*, product:products(id, name, unit)')
         .order('created_at', { ascending: false });
       if (siteId) query = query.eq('site_id', siteId);
+      query = query.eq('is_archived', showArchived);
       const { data } = await query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const prodData = (data as MovementWithProduct[]) ?? [];
       setMovements(prodData.map(m => ({
         id: m.id,
-        movement_type: m.movement_type,
+        movement_type: m.type,
         quantity: m.quantity,
-        stock_before: m.stock_before,
-        stock_after: m.stock_after,
+        stock_before: m.stock_before ?? 0,
+        stock_after: m.stock_after ?? 0,
         reason: m.reason,
         created_at: m.created_at,
         name: m.product?.name ?? 'Produit supprimé',
@@ -401,9 +431,50 @@ export function StockMovements({ products, components = [], useComponentStock = 
       })));
     }
     setLoading(false);
-  }, [page, siteId, useComponentStock]);
+  }, [page, siteId, useComponentStock, showArchived]);
+
+  const loadResetLogs = useCallback(async () => {
+    if (!siteId) return;
+    const { data } = await supabase
+      .from('stock_reset_logs')
+      .select('id, performed_by_name, products_reset, components_reset, created_at')
+      .eq('site_id', siteId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setResetLogs((data as ResetLog[]) ?? []);
+  }, [siteId]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function handleArchive() {
+    if (!siteId) return;
+    setArchiving(true);
+    const nextDay = new Date(`${archiveDate}T00:00:00`);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const { data, error } = await supabase.rpc('archive_old_stock_movements', {
+      p_site_id: siteId,
+      p_before_date: localISODate(nextDay),
+    });
+    setArchiving(false);
+    if (error || !data) {
+      toast('error', 'Erreur lors de l\'archivage');
+      return;
+    }
+    const result = data as { products_archived: number; components_archived: number };
+    const total = result.products_archived + result.components_archived;
+    if (total === 0) {
+      toast('error', 'Aucun mouvement à archiver jusqu\'à cette date');
+    } else {
+      toast('success', `${result.products_archived} produit(s) et ${result.components_archived} composant(s) archivés`);
+    }
+    setShowArchiveModal(false);
+    setPage(0);
+    if (showArchived) setShowArchived(false); else load();
+  }
+
+  useEffect(() => {
+    if (isAdmin && siteId) loadResetLogs();
+  }, [isAdmin, siteId, loadResetLogs]);
 
   const filtered = movements.filter(m => {
     if (filterType && m.movement_type !== filterType) return false;
@@ -422,8 +493,8 @@ export function StockMovements({ products, components = [], useComponentStock = 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: 'Entrées', value: totalIn, ...movementConfig.in },
-          { label: 'Sorties', value: totalOut, ...movementConfig.out },
+          { value: totalIn, ...movementConfig.in },
+          { value: totalOut, ...movementConfig.out },
           { label: 'Mouvements', value: movements.length, icon: Package, color: 'text-white/60', bg: 'bg-white/5', border: 'border-white/10' },
         ].map(s => {
           const Icon = s.icon;
@@ -438,6 +509,29 @@ export function StockMovements({ products, components = [], useComponentStock = 
           );
         })}
       </div>
+
+      {isAdmin && siteId && (
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => { setPage(0); setShowArchived(s => !s); }}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-medium transition-all ${showArchived ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' : 'bg-white/5 border-white/10 text-white/40 hover:text-white/70'}`}
+          >
+            <Archive size={13} /> {showArchived ? 'Voir actifs' : 'Voir archivés'}
+          </button>
+          <button
+            onClick={() => setShowArchiveModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/25 text-amber-300 text-xs font-medium transition-all"
+          >
+            <Archive size={13} /> Archiver anciens mouvements
+          </button>
+          <button
+            onClick={() => setShowReset(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 text-red-300 text-xs font-medium transition-all"
+          >
+            <RotateCcw size={13} /> Remettre tout le stock à zéro
+          </button>
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -511,7 +605,7 @@ export function StockMovements({ products, components = [], useComponentStock = 
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-14">
             <Package size={28} className="text-white/15 mb-3" />
-            <p className="text-white/30 text-sm">Aucun mouvement trouvé</p>
+            <p className="text-white/30 text-sm">{showArchived ? 'Aucun mouvement archivé' : 'Aucun mouvement trouvé'}</p>
           </div>
         ) : (
           <AnimatePresence mode="popLayout">
@@ -554,6 +648,126 @@ export function StockMovements({ products, components = [], useComponentStock = 
           </AnimatePresence>
         )}
       </div>
+
+      {isAdmin && resetLogs.length > 0 && (
+        <div className="rounded-2xl border border-white/8 overflow-hidden">
+          <button
+            onClick={() => setShowResetHistory(s => !s)}
+            className="w-full flex items-center gap-3 px-4 py-3 border-b border-white/8 bg-white/3 hover:bg-white/5 transition-colors"
+          >
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-amber-500/10 border border-amber-500/20">
+              <History size={13} className="text-amber-400" />
+            </div>
+            <span className="flex-1 text-left text-white text-sm font-medium">Historique des remises à zéro</span>
+            <span className="text-white/30 text-xs">{resetLogs.length}</span>
+            <ChevronDown size={15} className={`text-white/30 transition-transform ${showResetHistory ? 'rotate-180' : ''}`} />
+          </button>
+          <AnimatePresence>
+            {showResetHistory && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                {resetLogs.map(log => (
+                  <div key={log.id} className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-red-500/10 border border-red-500/20">
+                      <RotateCcw size={12} className="text-red-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm font-medium truncate">{log.performed_by_name}</p>
+                      <p className="text-white/30 text-[10px]">
+                        {log.products_reset} produit(s) · {log.components_reset} composant(s)
+                      </p>
+                    </div>
+                    <div className="w-40 text-right">
+                      <p className="text-white/40 text-xs">
+                        {new Date(log.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </p>
+                      <p className="text-white/25 text-[10px]">
+                        {new Date(log.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      <AnimatePresence>
+        {showReset && siteId && (
+          <ResetStockModal
+            siteId={siteId}
+            onClose={() => setShowReset(false)}
+            onDone={() => { setShowReset(false); load(); loadResetLogs(); }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showArchiveModal && siteId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={e => e.target === e.currentTarget && setShowArchiveModal(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-md bg-gray-900 border border-white/10 rounded-2xl shadow-2xl p-6 space-y-5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center flex-shrink-0">
+                    <Archive size={18} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-white font-semibold text-base">Archiver les anciens mouvements</h3>
+                    <p className="text-white/50 text-sm mt-1">
+                      Tous les mouvements jusqu'à la date sélectionnée (incluse) seront masqués de la liste principale.
+                      Vous pourrez toujours les consulter en activant « Voir archivés ».
+                    </p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setShowArchiveModal(false)} className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white transition-all flex-shrink-0">
+                  <X size={15} />
+                </button>
+              </div>
+
+              <div>
+                <label className="text-white/60 text-xs font-medium block mb-1.5">
+                  Archiver jusqu'au (inclus)
+                </label>
+                <input
+                  type="date"
+                  value={archiveDate}
+                  max={localISODate(new Date())}
+                  onChange={e => setArchiveDate(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-amber-500/40 transition-all"
+                  style={{ colorScheme: 'dark' }}
+                />
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <button type="button" onClick={() => setShowArchiveModal(false)} disabled={archiving} className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-sm font-medium transition-all disabled:opacity-40">
+                  Annuler
+                </button>
+                <button type="button" onClick={handleArchive} disabled={archiving} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-all disabled:opacity-40">
+                  {archiving && <div className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />}
+                  <Archive size={14} /> Archiver
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {movements.length >= PAGE_SIZE && (
         <button

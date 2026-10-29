@@ -4,7 +4,7 @@ import {
   Lock, Unlock, TrendingUp, ShoppingBag, Banknote,
   Smartphone, CreditCard, ChevronDown, CheckCircle2,
   AlertTriangle, ArrowUpRight, ArrowDownRight, Minus,
-  RefreshCw, Loader2, Calendar, X, Receipt
+  RefreshCw, Loader2, Calendar, X, Receipt, Ban
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useTenant } from '../context/TenantContext';
@@ -34,7 +34,10 @@ const METHOD_CONFIG: { id: PaymentMethod; label: string; icon: typeof Banknote; 
   { id: 'card', label: 'Carte', icon: CreditCard, color: 'text-violet-400' },
 ];
 
-function SessionRow({ session, sym, onClick }: { session: CashSession; sym: string; onClick: () => void }) {
+type CancelStat = { count: number; total: number };
+const NO_CANCEL: CancelStat = { count: 0, total: 0 };
+
+function SessionRow({ session, sym, cancel, onClick }: { session: CashSession; sym: string; cancel: CancelStat; onClick: () => void }) {
   const diff = session.cash_difference;
   const openedAt = new Date(session.opened_at);
   const closedAt = session.closed_at ? new Date(session.closed_at) : null;
@@ -76,6 +79,11 @@ function SessionRow({ session, sym, onClick }: { session: CashSession; sym: stri
         <div className="text-right flex-shrink-0">
           <p className="text-emerald-400 font-black text-base leading-tight">{fmt(session.total_sales, sym)}</p>
           <p className="text-white/40 text-[10px]">{session.sales_count} vente{session.sales_count !== 1 ? 's' : ''}</p>
+          {cancel.count > 0 && (
+            <p className="text-red-300 text-[10px] font-semibold flex items-center justify-end gap-1 mt-0.5">
+              <Ban size={10} /> {cancel.count} annulé{cancel.count > 1 ? 's' : ''} · {fmt(cancel.total, sym)}
+            </p>
+          )}
         </div>
       </div>
 
@@ -101,7 +109,7 @@ function SessionRow({ session, sym, onClick }: { session: CashSession; sym: stri
   );
 }
 
-function SessionDetailModal({ session, sym, onClose }: { session: CashSession; sym: string; onClose: () => void }) {
+function SessionDetailModal({ session, sym, cancel, onClose }: { session: CashSession; sym: string; cancel: CancelStat; onClose: () => void }) {
   const diff = session.cash_difference;
   const openedAt = new Date(session.opened_at);
   const closedAt = session.closed_at ? new Date(session.closed_at) : null;
@@ -162,6 +170,13 @@ function SessionDetailModal({ session, sym, onClose }: { session: CashSession; s
                 <span className="text-white/40 text-[10px]">Ventes</span>
               </div>
               <p className="text-white font-black text-lg">{session.sales_count}</p>
+            </div>
+            <div className={`col-span-2 rounded-xl p-3 border flex items-center justify-between ${cancel.count > 0 ? 'bg-red-500/8 border-red-500/20' : 'bg-white/4 border-white/6'}`}>
+              <div className="flex items-center gap-1.5">
+                <Ban size={12} className={cancel.count > 0 ? 'text-red-400' : 'text-white/40'} />
+                <span className="text-white/50 text-[11px]">Tickets annulés ({cancel.count})</span>
+              </div>
+              <p className={`font-black text-sm ${cancel.count > 0 ? 'text-red-300' : 'text-white/30'}`}>{fmt(cancel.total, sym)}</p>
             </div>
           </div>
 
@@ -253,12 +268,35 @@ export function CashSessionsPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<CashSession | null>(null);
   const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('all');
+  const [cancelBySession, setCancelBySession] = useState<Record<string, CancelStat>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
     const query = supabase.from('cash_sessions').select('*').eq('site_id', siteId).order('opened_at', { ascending: false }).limit(100);
     const { data } = await query;
-    setSessions((data ?? []) as CashSession[]);
+    const list = (data ?? []) as CashSession[];
+    setSessions(list);
+
+    const stats: Record<string, CancelStat> = {};
+    if (list.length > 0) {
+      const oldest = list[list.length - 1].opened_at;
+      const { data: cancelled } = await supabase
+        .from('sales')
+        .select('total, cancelled_at')
+        .eq('site_id', siteId)
+        .eq('status', 'cancelled')
+        .gte('cancelled_at', oldest);
+      const now = new Date().toISOString();
+      for (const c of (cancelled ?? []) as { total: number; cancelled_at: string }[]) {
+        const s = list.find(x => c.cancelled_at >= x.opened_at && c.cancelled_at <= (x.closed_at ?? now));
+        if (!s) continue;
+        const cur = stats[s.id] ?? { count: 0, total: 0 };
+        cur.count += 1;
+        cur.total += Number(c.total);
+        stats[s.id] = cur;
+      }
+    }
+    setCancelBySession(stats);
     setLoading(false);
   }, [siteId]);
 
@@ -337,7 +375,7 @@ export function CashSessionsPage() {
         ) : (
           <AnimatePresence mode="popLayout">
             {filtered.map(s => (
-              <SessionRow key={s.id} session={s} sym={sym} onClick={() => setSelected(s)} />
+              <SessionRow key={s.id} session={s} sym={sym} cancel={cancelBySession[s.id] ?? NO_CANCEL} onClick={() => setSelected(s)} />
             ))}
           </AnimatePresence>
         )}
@@ -345,7 +383,7 @@ export function CashSessionsPage() {
 
       <AnimatePresence>
         {selected && (
-          <SessionDetailModal session={selected} sym={sym} onClose={() => setSelected(null)} />
+          <SessionDetailModal session={selected} sym={sym} cancel={cancelBySession[selected.id] ?? NO_CANCEL} onClose={() => setSelected(null)} />
         )}
       </AnimatePresence>
     </div>

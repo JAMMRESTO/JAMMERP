@@ -574,11 +574,11 @@ export function TenantOnboardingScreen() {
       ];
       await supabase.from('settings').upsert(settingsToSave, { onConflict: 'site_id,key' });
 
-      // Resolve global roles
+      // Resolve this tenant's roles
       const { data: rolesData } = await supabase
         .from('roles')
         .select('id, name')
-        .is('tenant_id', null);
+        .eq('tenant_id', tenant!.id);
       const roleMap: Record<string, string> = {};
       for (const r of rolesData ?? []) roleMap[r.name] = r.id;
 

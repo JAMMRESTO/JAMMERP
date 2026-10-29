@@ -39,6 +39,7 @@ export function ComponentsPage() {
       supabase.from('component_stock_movements')
         .select('*, component:product_components(id, name, unit)')
         .eq('site_id', siteId)
+        .eq('is_archived', false)
         .gte('created_at', cutoff)
         .order('created_at', { ascending: false }),
     ]);

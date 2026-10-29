@@ -258,10 +258,10 @@ export interface StockMovement {
   id: string;
   site_id: string | null;
   product_id: string;
-  movement_type: StockMovementType;
+  type: StockMovementType;
   quantity: number;
-  stock_before: number;
-  stock_after: number;
+  stock_before: number | null;
+  stock_after: number | null;
   reason: string;
   user_id: string | null;
   created_at: string;

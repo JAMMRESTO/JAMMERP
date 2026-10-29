@@ -691,6 +691,10 @@ export interface EscposXReportData {
   };
   byCategory: { name: string; count: number; total: number }[];
   byUser: { name: string; products: { name: string; qty: number }[] }[];
+  cashExpenses: number;
+  cancelledItems: { name: string; qty: number; total: number }[];
+  cancelledTickets: { sale_number: number; total: number; cancelled_at: string }[];
+  cancelledTotal: number;
   openingBalance: number;
   expectedCash: number;
   actualCash: number;
@@ -753,6 +757,7 @@ export function buildXReportBytes(
   parts.push(BOLD_ON, line('ACTIVITE'), BOLD_OFF);
   parts.push(strBytes(padLine('Nb de ventes', String(data.salesCount))));
   parts.push(BOLD_ON, strBytes(padLine('CA Total', fmt(data.totalSales))), BOLD_OFF);
+  parts.push(strBytes(padLine(`Tickets annules (${data.cancelledTickets.length})`, fmt(data.cancelledTotal))));
   parts.push(dashedLine());
 
   parts.push(BOLD_ON, line('ENCAISSEMENTS'), BOLD_OFF);
@@ -764,6 +769,9 @@ export function buildXReportBytes(
     data.byMethod.cash + data.byMethod.wave + data.byMethod.orange_money + data.byMethod.card;
   parts.push(dashedLine());
   parts.push(BOLD_ON, strBytes(padLine('Total encaisse', fmt(totalEncaisse))), BOLD_OFF);
+  if (data.cashExpenses > 0) {
+    parts.push(strBytes(padLine('Depenses especes', `- ${fmt(data.cashExpenses)}`)));
+  }
   parts.push(dashedLine());
 
   if (data.byCategory.length > 0) {
@@ -784,6 +792,27 @@ export function buildXReportBytes(
         for (const productLine of productLines.slice(1)) {
           parts.push(line(`  ${productLine}`));
         }
+      }
+    }
+    parts.push(dashedLine());
+  }
+
+  if (data.cancelledTickets.length > 0) {
+    parts.push(BOLD_ON, line('TICKETS ANNULES'), BOLD_OFF);
+    for (const t of data.cancelledTickets) {
+      parts.push(strBytes(padLine(`#${t.sale_number} ${fmtTime(new Date(t.cancelled_at))}`, `- ${fmt(t.total)}`)));
+    }
+    parts.push(BOLD_ON, strBytes(padLine('Total annule', `- ${fmt(data.cancelledTotal)}`)), BOLD_OFF);
+    parts.push(dashedLine());
+  }
+
+  if (data.cancelledItems.length > 0) {
+    parts.push(BOLD_ON, line('PRODUITS ANNULES'), BOLD_OFF);
+    for (const item of data.cancelledItems) {
+      const itemLines = wrapPrinterText(`${item.name} x${item.qty}`, RECEIPT_WIDTH - 12);
+      parts.push(strBytes(padLine(itemLines[0], `- ${fmt(item.total)}`)));
+      for (const itemLine of itemLines.slice(1)) {
+        parts.push(line(`  ${itemLine}`));
       }
     }
     parts.push(dashedLine());

@@ -6,7 +6,7 @@ import {
   Package, ChefHat, Truck, Clock, CheckCircle2, UserCircle2,
   Building2, Globe, LayoutGrid, Wallet, Printer,
   Calendar, ChevronLeft, ChevronRight, ChevronDown, BarChart3,
-  Tag, ShoppingBag as BagIcon,
+  Tag, ShoppingBag as BagIcon, Ban,
   type LucideIcon
 } from 'lucide-react';
 import {
@@ -37,6 +37,7 @@ interface LiveOrder { id: string; order_number: number; table: string; status: s
 interface DashAlert { id: string; level: 'warning' | 'error' | 'info'; title: string; message: string; time: string }
 interface UserRevenue { cashier_id: string | null; name: string; revenue: number; count: number; avatar_url: string; products: ProductPoint[] }
 interface SiteStat { site: Site; revenue: number; orders: number; avgTicket: number }
+interface CancelledSale { id: string; sale_number: number; total: number; cancelled_at: string; cancelled_by_name: string; cancel_reason: string; cashier_name: string; site_name: string }
 
 type DetailTab = 'categories' | 'products' | 'cashiers';
 
@@ -350,6 +351,7 @@ export function Dashboard() {
   const [alerts, setAlerts]         = useState<DashAlert[]>([]);
   const [userRevenues, setUserRevenues] = useState<UserRevenue[]>([]);
   const [siteStats, setSiteStats]   = useState<SiteStat[]>([]);
+  const [cancelledSales, setCancelledSales] = useState<CancelledSale[]>([]);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [detailTab, setDetailTab]   = useState<DetailTab>('categories');
@@ -379,7 +381,7 @@ export function Dashboard() {
         ? q.eq('site_id', siteIds[0])
         : q.in('site_id', siteIds);
 
-    const [allSales, staleOrders, orders, lowProducts, lowIngredients, allUsers, allExpenses] = await Promise.all([
+    const [allSales, staleOrders, orders, lowProducts, lowIngredients, allUsers, allExpenses, cancelledRes] = await Promise.all([
       sf(supabase.from('sales').select('total, created_at, site_id, cashier_id')).eq('status','paid').gte('created_at', weekAgo+'T00:00:00'),
       sf(supabase.from('orders').select('id, order_number, status, created_at')).in('status',['pending','preparing']).lt('created_at', new Date(Date.now() - 20 * 60000).toISOString()).limit(5),
       sf(supabase.from('orders').select('id, order_number, status, order_type, notes, created_at')).in('status',['pending','preparing','ready']).order('created_at',{ ascending: false }).limit(5),
@@ -387,6 +389,7 @@ export function Dashboard() {
       sf(supabase.from('ingredients').select('name, stock, low_stock_threshold')).eq('is_active',true).gt('low_stock_threshold',0).lte('stock',0).limit(10),
       sf(supabase.from('users').select('id, name, avatar_url')).eq('is_active',true),
       sf(supabase.from('expenses').select('amount, expense_date')).gte('expense_date', dayBefore).lte('expense_date', selected),
+      sf(supabase.from('sales').select('id, sale_number, total, cancelled_at, cancelled_by_name, cancel_reason, cashier_id, site_id')).eq('status','cancelled').gte('cancelled_at', dayBefore+'T00:00:00').lte('cancelled_at', selected+'T23:59:59').order('cancelled_at', { ascending: false }),
     ]);
 
     // Split the single sales query into selected / dayBefore / week
@@ -410,6 +413,27 @@ export function Dashboard() {
     const selNet = selRevenue - selExpTotal;
     const prevNet  = prevRevenue - prevExpTotal;
 
+    type CancelRow = { id: string; sale_number: number; total: number; cancelled_at: string; cancelled_by_name: string | null; cancel_reason: string | null; cashier_id: string | null; site_id: string };
+    const cancelRows = (cancelledRes.data ?? []) as CancelRow[];
+    const selCancelled = cancelRows.filter(c => c.cancelled_at >= selStart && c.cancelled_at <= selEnd);
+    const prevCancelled = cancelRows.filter(c => c.cancelled_at >= prevStart && c.cancelled_at <= prevEnd);
+    const selCancelTotal = selCancelled.reduce((s, c) => s + Number(c.total), 0);
+    const prevCancelTotal = prevCancelled.reduce((s, c) => s + Number(c.total), 0);
+    const userNames: Record<string, string> = {};
+    (allUsers.data ?? []).forEach((u: {id: string; name: string}) => { userNames[u.id] = u.name; });
+    const siteNames: Record<string, string> = {};
+    querySites.forEach(s => { siteNames[s.id] = s.name; });
+    setCancelledSales(selCancelled.map(c => ({
+      id: c.id,
+      sale_number: c.sale_number,
+      total: Number(c.total),
+      cancelled_at: c.cancelled_at,
+      cancelled_by_name: c.cancelled_by_name ?? '',
+      cancel_reason: c.cancel_reason ?? '',
+      cashier_name: c.cashier_id ? (userNames[c.cashier_id] ?? 'Inconnu') : 'Non assigné',
+      site_name: siteNames[c.site_id] ?? '',
+    })));
+
     const isToday = selected === todayStr;
     const compareLabel = isToday ? 'vs hier' : `vs ${new Date(dayBefore+'T00:00:00').toLocaleDateString('fr-FR', {day:'numeric', month:'short'})}`;
 
@@ -419,6 +443,7 @@ export function Dashboard() {
       { label: 'Depenses',           value: `${selExpTotal.toLocaleString('fr-FR')} ${sym}`, rawValue: selExpTotal, change: pct(selExpTotal, prevExpTotal), icon: Wallet, color: '#EF4444', bg: '#EF444420' },
       { label: 'Benefice net',       value: `${selNet.toLocaleString('fr-FR')} ${sym}`, rawValue: selNet, change: pct(selNet, prevNet), icon: TrendingUp, color: '#F59E0B', bg: '#F59E0B20' },
       { label: 'Ticket moyen',       value: `${avgTicket.toLocaleString('fr-FR')} ${sym}`, rawValue: avgTicket, change: pct(avgTicket, prevAvg), icon: Receipt, color: '#06B6D4', bg: '#06B6D420' },
+      { label: `Tickets annulés (${selCancelled.length})`, value: `${selCancelTotal.toLocaleString('fr-FR')} ${sym}`, rawValue: selCancelTotal, change: pct(selCancelTotal, prevCancelTotal), icon: Ban, color: '#F87171', bg: '#F8717120' },
     ]);
 
     // ─── Per-site stats ────────────────────────────────────────
@@ -815,9 +840,9 @@ export function Dashboard() {
             className="space-y-3 sm:space-y-4"
           >
             {/* KPI cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-3">
               {loading
-                ? Array.from({ length: 5 }).map((_, i) => (
+                ? Array.from({ length: 6 }).map((_, i) => (
                     <div key={i} className="glass-card rounded-2xl p-4 border border-white/8 h-24 animate-pulse bg-white/3" />
                   ))
                 : kpis.map((k, i) => <StatCard key={k.label} kpi={k} index={i} />)
@@ -1265,6 +1290,49 @@ export function Dashboard() {
                 )}
               </div>
             )}
+
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.48 }} className="glass-card rounded-2xl border border-white/8 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8">
+                <div className="flex items-center gap-2">
+                  <Ban size={14} className="text-red-400" />
+                  <h3 className="text-white font-semibold text-sm">Tickets annulés</h3>
+                </div>
+                <span className="text-red-300 text-xs font-semibold">
+                  {cancelledSales.length} — {cancelledSales.reduce((s, c) => s + c.total, 0).toLocaleString('fr-FR')} {sym}
+                </span>
+              </div>
+              {cancelledSales.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8">
+                  <CheckCircle2 size={28} className="text-emerald-400/30 mb-2" />
+                  <p className="text-white/30 text-sm">Aucun ticket annulé ce jour</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-white/5 max-h-80 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                  {cancelledSales.map(c => (
+                    <div key={c.id} className="flex items-start gap-3 px-5 py-3 hover:bg-white/3 transition-colors">
+                      <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                        <Receipt size={13} className="text-red-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-white font-medium text-xs">Ticket #{c.sale_number}</span>
+                          <span className="text-white/40 text-[10px]">Caissier : {c.cashier_name}</span>
+                          {showMultiView && c.site_name && <span className="text-white/30 text-[10px]">{c.site_name}</span>}
+                        </div>
+                        <p className="text-white/40 text-[10px] mt-0.5 leading-snug truncate">
+                          {c.cancelled_by_name ? `Annulé par ${c.cancelled_by_name}` : 'Annulé'}
+                          {c.cancel_reason ? ` — ${c.cancel_reason}` : ''}
+                        </p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-red-300 text-xs font-bold">{c.total.toLocaleString('fr-FR')} {sym}</p>
+                        <p className="text-white/25 text-[10px]">{new Date(c.cancelled_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

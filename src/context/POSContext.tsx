@@ -590,19 +590,14 @@ export function POSProvider({ children, taxRate }: { children: ReactNode; taxRat
   }, [siteId]);
 
   const cancelSale = useCallback(async (saleId: string, adminId: string, adminName: string, reason: string): Promise<boolean> => {
-    const { error } = await supabase
-      .from('sales')
-      .update({
-        status: 'cancelled',
-        cancelled_by: adminId,
-        cancelled_by_name: adminName,
-        cancelled_at: new Date().toISOString(),
-        cancel_reason: reason,
-      })
-      .eq('id', saleId)
-      .eq('site_id', siteId);
+    const { error } = await supabase.rpc('cancel_sale_and_restore_stock', {
+      p_sale_id: saleId,
+      p_admin_id: adminId,
+      p_admin_name: adminName,
+      p_reason: reason,
+    });
     return !error;
-  }, [siteId]);
+  }, []);
 
   return (
     <POSContext.Provider value={{
