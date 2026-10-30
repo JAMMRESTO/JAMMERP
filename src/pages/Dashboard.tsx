@@ -598,8 +598,11 @@ export function Dashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_sessions' }, handleChange)
       .subscribe();
 
-    // Polling fallback: reload every 15s in case realtime events are missed
-    const pollInterval = setInterval(() => { load(); loadDetailData(selDate); }, 15000);
+    // Polling fallback: reload every 15s in case realtime events are missed.
+    // Use reloadRef (not the captured load/selDate) so we always call the
+    // latest version with the correct currentSite — otherwise the first
+    // render's load (where currentSite is null) overwrites data with zeros.
+    const pollInterval = setInterval(() => reloadRef.current(), 15000);
 
     return () => {
       supabase.removeChannel(channel);
